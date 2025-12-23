@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  /* -- UI Backgrounds -- */
+  --color-bg-main: #0F0F11;      /* Deepest black (App bg) */
+  --color-bg-panel: #1A1A1D;     /* Panel bg (Cards) */
+  --color-bg-hover: #27272A;     /* Hover state */
+  
+  /* -- Borders -- */
+  --color-border: #2E2E32;       /* Subtle separators */
+  
+  /* -- Text -- */
+  --color-text-primary: #FFFFFF;
+  --color-text-secondary: #A1A1AA;
+  
+  /* -- Accents (From Image) -- */
+  --color-brand-blue: #3B82F6;   /* "Render" / "Generate" buttons */
+  --color-brand-purple: #8B5CF6; /* "Magic Correction" icon */
+  --color-brand-yellow: #EAB308; /* Timeline active clip */
+  
+  /* -- Timeline specific -- */
+  --color-track-bg: #151517;
+}
+
+/* Custom Scrollbar for that "App" feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3F3F46;
+  border-radius: 3px;
+}
