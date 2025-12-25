@@ -16,7 +16,6 @@ export default function EditorPage() {
         <header className="h-14 border-b border-border-gray bg-bg-black flex items-center px-6 justify-between">
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-semibold text-text-secondary">
-              Untitled Project 
               <span className="text-xs text-electric-red ml-2 border border-electric-red/30 px-2 py-0.5 rounded bg-electric-red/10">
                 VOXEDIT AI
               </span>
