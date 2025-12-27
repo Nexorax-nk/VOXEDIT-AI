@@ -13,7 +13,7 @@ import {
 import { ToolId } from "./Sidebar";
 
 // ================= TYPES =================
-type MediaFile = {
+export type MediaFile = {
   name: string;
   type: "video" | "image";
   url: string;
@@ -37,6 +37,7 @@ const MediaPanel = ({ onSelect }: { onSelect?: (url: string) => void }) => {
     Array.from(e.target.files).forEach((file) => {
       const url = URL.createObjectURL(file);
 
+      // 🎥 VIDEO
       if (file.type.startsWith("video")) {
         const video = document.createElement("video");
         video.src = url;
@@ -51,7 +52,9 @@ const MediaPanel = ({ onSelect }: { onSelect?: (url: string) => void }) => {
             },
           ]);
         };
-      } else {
+      }
+      // 🖼 IMAGE
+      else {
         setFiles((prev) => [
           ...prev,
           {
@@ -65,7 +68,7 @@ const MediaPanel = ({ onSelect }: { onSelect?: (url: string) => void }) => {
     });
   };
 
-  // ---- DRAG START (TIMELINE) ----
+  // ---- 🔥 CRITICAL: DRAG TO TIMELINE ----
   const handleDragStart = (e: React.DragEvent, file: MediaFile) => {
     e.dataTransfer.setData("application/json", JSON.stringify(file));
     e.dataTransfer.effectAllowed = "copy";
@@ -74,7 +77,7 @@ const MediaPanel = ({ onSelect }: { onSelect?: (url: string) => void }) => {
   return (
     <div className="flex flex-col h-full bg-black/40">
 
-      {/* File Input */}
+      {/* Hidden File Input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -141,7 +144,7 @@ const MediaPanel = ({ onSelect }: { onSelect?: (url: string) => void }) => {
                   />
                 )}
 
-                {/* Hover Overlay */}
+                {/* Hover Play Overlay */}
                 <div className="
                   absolute inset-0 bg-black/40
                   opacity-0 group-hover:opacity-100
@@ -164,7 +167,7 @@ const MediaPanel = ({ onSelect }: { onSelect?: (url: string) => void }) => {
   );
 };
 
-// ================= PLACEHOLDERS =================
+// ================= OTHER PANELS =================
 const CopilotPanel = () => (
   <div className="p-4 text-gray-400">Copilot Panel</div>
 );
