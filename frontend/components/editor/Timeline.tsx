@@ -1,10 +1,11 @@
 // components/editor/Timeline.tsx
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { ZoomIn, ZoomOut, Maximize, Scissors, GripVertical, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// --- TYPES ---
 export type TrackType = "video" | "audio" | "text";
 export type Clip = {
   id: string;
@@ -27,11 +28,11 @@ interface TimelineProps {
   tracks: Track[];
   currentTime: number;
   onSeek: (time: number) => void;
-  // Actions
-  onDropNewClip: (trackId: string, clipData: any, time: number) => void; // NEW: Drop from Library
+  onDropNewClip: (trackId: string, clipData: any, time: number) => void;
   onUpdateClip: (trackId: string, clipId: string, updates: Partial<Clip>) => void;
   onSwitchTrack: (clipId: string, oldTrackId: string, newTrackId: string, newStart: number) => void;
-  // Selection
+  onSplitClip: (trackId: string, clipId: string, splitTime: number) => void;
+  onDeleteClip: (trackId: string, clipId: string) => void;
   selectedClipId?: string;
   onSelectClip: (id: string | null) => void;
 }
@@ -43,14 +44,17 @@ export default function Timeline({
   onDropNewClip,
   onUpdateClip,
   onSwitchTrack,
+  onSplitClip,
+  onDeleteClip,
   selectedClipId,
   onSelectClip
 }: TimelineProps) {
   
-  const [zoom, setZoom] = useState(20);
+  const [zoom, setZoom] = useState(20); 
   const containerRef = useRef<HTMLDivElement>(null);
-  
-  // Drag State (For Internal Moves/Trims)
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Interaction State
   const [dragState, setDragState] = useState<{
     mode: InteractionMode;
     clipId: string | null;
@@ -62,7 +66,17 @@ export default function Timeline({
 
   const pixelsToSeconds = (px: number) => px / zoom;
 
-  // --- 1. ZOOM LOGIC (Wheel/Touchpad) ---
+  // --- 1. RULER ---
+  const rulerTicks = useMemo(() => {
+    let step = 1; 
+    if (zoom < 10) step = 30; else if (zoom < 30) step = 10; else if (zoom < 80) step = 5; else step = 1;
+    const ticks = [];
+    const maxTime = 1200; // 20 mins
+    for (let i = 0; i <= maxTime; i += step) ticks.push(i);
+    return { ticks, step };
+  }, [zoom]);
+
+  // --- 2. ZOOM ---
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -70,14 +84,37 @@ export default function Timeline({
       if (e.ctrlKey || Math.abs(e.deltaY) < 50) { 
         e.preventDefault();
         const delta = e.deltaY > 0 ? 0.9 : 1.1;
-        setZoom(prev => Math.min(Math.max(prev * delta, 2), 200));
+        setZoom(prev => Math.min(Math.max(prev * delta, 2), 300));
       }
     };
     container.addEventListener("wheel", handleWheel, { passive: false });
     return () => container.removeEventListener("wheel", handleWheel);
   }, []);
 
-  // --- 2. HTML5 DRAG & DROP (New Clips from Library) ---
+  // --- 3. KEYBOARD SHORTCUTS ---
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // DELETE
+      if ((e.key === "Backspace" || e.key === "Delete") && selectedClipId) {
+        for (const track of tracks) {
+          const clip = track.clips.find(c => c.id === selectedClipId);
+          if (clip) {
+            onDeleteClip(track.id, clip.id);
+            onSelectClip(null);
+            break;
+          }
+        }
+      }
+      // CUT (Ctrl+K or C)
+      if ((e.key === "c" || (e.ctrlKey && e.key === "k")) && selectedClipId) {
+         handleSplit();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedClipId, tracks, onDeleteClip, onSelectClip, currentTime]); // Added currentTime dependency for accurate cuts
+
+  // --- 4. DRAG & DROP (New Clips) ---
   const handleExternalDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
@@ -85,37 +122,31 @@ export default function Timeline({
 
   const handleExternalDrop = (e: React.DragEvent, trackId: string) => {
     e.preventDefault();
-    // Only handle if it's NOT an internal move (internal moves use mouse listeners below)
     if (dragState.mode !== "NONE") return;
 
     const data = e.dataTransfer.getData("application/json");
-    if (data) {
-        // Calculate Time
-        const rect = e.currentTarget.getBoundingClientRect();
-        const offsetX = e.clientX - rect.left + e.currentTarget.scrollLeft; // Simplified calculation
-        // Correcting for the left-sidebar offset if needed, but relative to e.currentTarget (the track lane) is safer:
-        // Actually, e.clientX is global. e.currentTarget is the Track Div.
-        // We need position relative to the SCROLL CONTAINER (parent of Track Divs).
-        // Let's rely on the containerRef for global offset calculation.
-        if (containerRef.current) {
-            // Find the scrolling area
-            const scrollArea = containerRef.current.querySelector('.timeline-scroll-area');
-            if (scrollArea) {
-                const scrollRect = scrollArea.getBoundingClientRect();
-                const scrollLeft = scrollArea.scrollLeft;
-                const clickX = e.clientX - scrollRect.left + scrollLeft;
-                const dropTime = Math.max(0, clickX / zoom);
-                
-                onDropNewClip(trackId, JSON.parse(data), dropTime);
-            }
+    if (data && scrollContainerRef.current) {
+        const rect = scrollContainerRef.current.getBoundingClientRect();
+        const scrollLeft = scrollContainerRef.current.scrollLeft;
+        const clickX = e.clientX - rect.left + scrollLeft;
+        const dropTime = Math.max(0, clickX / zoom);
+        
+        const clipData = JSON.parse(data);
+        onDropNewClip(trackId, clipData, dropTime);
+        
+        // Auto-Fit if timeline is empty
+        const totalClips = tracks.reduce((acc, t) => acc + t.clips.length, 0);
+        if (totalClips === 0 && scrollContainerRef.current) {
+             const width = scrollContainerRef.current.clientWidth;
+             setZoom(width / ((clipData.duration || 10) * 1.5));
         }
     }
   };
 
-  // --- 3. INTERNAL MOUSE HANDLERS (Move / Trim) ---
+  // --- 5. MOUSE HANDLERS (Move/Trim) ---
   const handleMouseDown = (e: React.MouseEvent, clip: Clip, trackId: string, mode: InteractionMode) => {
     e.stopPropagation();
-    e.preventDefault(); // Stop text selection
+    e.preventDefault();
     onSelectClip(clip.id);
     setDragState({
       mode,
@@ -132,17 +163,22 @@ export default function Timeline({
 
     const handleMouseMove = (e: MouseEvent) => {
       if (!dragState.clipId || !dragState.trackId) return;
+      
       const deltaSeconds = pixelsToSeconds(e.clientX - dragState.startX);
 
-      // LIVE UPDATE (Visual feedback)
+      // --- MOVE LOGIC ---
       if (dragState.mode === "MOVE") {
         const newStart = Math.max(0, dragState.originalStart + deltaSeconds);
         onUpdateClip(dragState.trackId, dragState.clipId, { start: newStart });
       }
+      
+      // --- TRIM LOGIC ---
       else if (dragState.mode === "TRIM_LEFT") {
-        const newStart = Math.min(dragState.originalStart + deltaSeconds, dragState.originalStart + dragState.originalDuration - 0.1);
+        // Calculate new start, ensuring we don't cross the end
+        const maxStart = dragState.originalStart + dragState.originalDuration - 0.1;
+        const newStart = Math.min(Math.max(0, dragState.originalStart + deltaSeconds), maxStart);
         const newDuration = dragState.originalDuration - (newStart - dragState.originalStart);
-        if (newStart >= 0) onUpdateClip(dragState.trackId, dragState.clipId, { start: newStart, duration: newDuration });
+        onUpdateClip(dragState.trackId, dragState.clipId, { start: newStart, duration: newDuration });
       }
       else if (dragState.mode === "TRIM_RIGHT") {
         const newDuration = Math.max(0.1, dragState.originalDuration + deltaSeconds);
@@ -151,10 +187,13 @@ export default function Timeline({
     };
 
     const handleMouseUp = (e: MouseEvent) => {
-       // CHECK TRACK SWITCH
+       // Handle Track Switching on Release
        if (dragState.mode === "MOVE") {
           const el = document.elementFromPoint(e.clientX, e.clientY);
-          const targetTrackId = el?.closest('[data-track-id]')?.getAttribute('data-track-id');
+          // Find the closest track container
+          const targetTrackEl = el?.closest('[data-track-id]');
+          const targetTrackId = targetTrackEl?.getAttribute('data-track-id');
+          
           if (targetTrackId && targetTrackId !== dragState.trackId) {
              const deltaSeconds = pixelsToSeconds(e.clientX - dragState.startX);
              const newStart = Math.max(0, dragState.originalStart + deltaSeconds);
@@ -170,16 +209,46 @@ export default function Timeline({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [dragState, tracks, zoom]); // Important dependencies
+  }, [dragState, tracks, zoom]); // Re-bind on state change is important
 
 
-  // --- FIT TO SCREEN ---
+  // --- HELPERS ---
   const fitToScreen = () => {
     let maxEnd = 10;
     tracks.forEach(t => t.clips.forEach(c => maxEnd = Math.max(maxEnd, c.start + c.duration)));
-    if (containerRef.current) {
-        const width = containerRef.current.clientWidth - 200; 
-        setZoom(width / (maxEnd * 1.05));
+    if (scrollContainerRef.current) {
+        const width = scrollContainerRef.current.clientWidth;
+        setZoom(width / (maxEnd * 1.1));
+    }
+  };
+
+  const handleSplit = () => {
+    // Priority: 1. Split Selected Clip at Playhead
+    // Priority: 2. If no selection, Split ALL clips under Playhead (Pro behavior)
+    // For now, let's implement Priority 1 as requested
+    
+    // Find track of selected clip
+    let targetTrackId = null;
+    let targetClipId = selectedClipId;
+
+    if (selectedClipId) {
+        const track = tracks.find(t => t.clips.some(c => c.id === selectedClipId));
+        if (track) targetTrackId = track.id;
+    } else {
+        // Fallback: Find top-most clip under playhead?
+        // Implementing simple "Select to Split" for safety first
+        return; 
+    }
+
+    if (targetTrackId && targetClipId) {
+        // Verify playhead is actually inside the clip
+        const track = tracks.find(t => t.id === targetTrackId);
+        const clip = track?.clips.find(c => c.id === targetClipId);
+        
+        if (clip && currentTime > clip.start && currentTime < (clip.start + clip.duration)) {
+             onSplitClip(targetTrackId, targetClipId, currentTime);
+             onSelectClip(null); // Deselect after split
+        }
     }
   };
 
@@ -187,52 +256,84 @@ export default function Timeline({
     <div className="flex flex-col h-full bg-bg-dark border-t border-border-gray select-none relative" ref={containerRef}>
       
       {/* TOOLBAR */}
-      <div className="h-10 border-b border-border-gray flex items-center justify-between px-4 bg-bg-dark shrink-0 z-30">
-         <div className="text-[10px] text-text-secondary flex gap-2">
-            <span className={cn("px-2 py-0.5 rounded", dragState.mode !== "NONE" ? "bg-electric-red text-white" : "bg-zinc-800")}>
-               {dragState.mode === "NONE" ? "Ready" : dragState.mode}
-            </span>
-            <span>Zoom: {Math.round(zoom)}%</span>
+      <div className="h-10 border-b border-border-gray flex items-center justify-between px-4 bg-bg-dark shrink-0 z-30 shadow-sm">
+         <div className="text-[10px] text-text-secondary flex gap-4 items-center">
+             
+             {/* SPLIT / RAZOR TOOL */}
+             <button 
+                onClick={handleSplit}
+                disabled={!selectedClipId}
+                className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded border transition-all",
+                    selectedClipId 
+                        ? "bg-electric-red text-white border-electric-red hover:bg-electric-red-hover shadow-[0_0_10px_rgba(255,46,77,0.3)]" 
+                        : "bg-zinc-800 text-gray-500 border-white/5 opacity-50 cursor-not-allowed"
+                )}
+                title="Split Clip at Playhead (C)"
+            >
+                <Scissors className="w-3.5 h-3.5" />
+                <span className="font-bold tracking-wide">RAZOR</span>
+            </button>
+
+            {/* DELETE TOOL */}
+            <button
+                onClick={() => selectedClipId && tracks.forEach(t => t.clips.find(c => c.id === selectedClipId) && onDeleteClip(t.id, selectedClipId))}
+                disabled={!selectedClipId}
+                className="p-1.5 hover:bg-bg-lighter rounded text-gray-400 hover:text-red-500 disabled:opacity-30 transition-colors"
+            >
+                <Trash2 className="w-4 h-4" />
+            </button>
          </div>
+
          <div className="flex items-center gap-3">
-             <button onClick={fitToScreen} title="Fit" className="hover:text-white text-gray-400"><Maximize className="w-3 h-3" /></button>
-             <button onClick={() => setZoom(z => Math.max(z - 5, 2))}><ZoomOut className="w-4 h-4 text-gray-400" /></button>
-             <button onClick={() => setZoom(z => Math.min(z + 5, 200))}><ZoomIn className="w-4 h-4 text-gray-400" /></button>
+             <button onClick={fitToScreen} className="p-1 hover:bg-bg-lighter rounded text-text-secondary hover:text-white transition-colors"><Maximize className="w-3 h-3" /></button>
+             <div className="h-4 w-px bg-border-gray" />
+             <button onClick={() => setZoom(z => Math.max(z - 10, 2))}><ZoomOut className="w-4 h-4 text-gray-400 hover:text-white" /></button>
+             <div className="w-20 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                 <div className="h-full bg-electric-red" style={{ width: `${Math.min(zoom/2, 100)}%` }} />
+             </div>
+             <button onClick={() => setZoom(z => Math.min(z + 10, 300))}><ZoomIn className="w-4 h-4 text-gray-400 hover:text-white" /></button>
          </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden relative">
         {/* HEADERS */}
-        <div className="w-48 bg-zinc-900 border-r border-border-gray flex flex-col shrink-0 z-20 shadow-xl">
-             <div className="h-8 border-b border-border-gray bg-zinc-900" />
+        <div className="w-48 bg-zinc-900 border-r border-border-gray flex flex-col shrink-0 z-20 shadow-[4px_0_10px_rgba(0,0,0,0.3)]">
+             <div className="h-9 border-b border-border-gray bg-zinc-950 flex items-center px-4 text-[10px] font-bold text-gray-500 tracking-wider">TRACKS</div>
              {tracks.map(track => (
-                 <div key={track.id} className="h-24 border-b border-border-gray/50 flex flex-col justify-center px-4 bg-zinc-900/50">
-                    <span className={cn("text-xs font-bold uppercase", track.type==='video'?"text-blue-400":track.type==='audio'?"text-emerald-400":"text-amber-400")}>{track.name}</span>
+                 <div key={track.id} className="h-24 border-b border-border-gray/30 flex flex-col justify-center px-4 bg-zinc-900/50 hover:bg-zinc-800/80 transition-colors group">
+                    <div className="flex items-center justify-between mb-1">
+                        <span className={cn("text-xs font-bold uppercase", track.type==='video'?"text-blue-400":track.type==='audio'?"text-emerald-400":"text-amber-400")}>{track.name}</span>
+                        <div className="w-2 h-2 rounded-full bg-white/10 group-hover:bg-electric-red/80 transition-colors" />
+                    </div>
                  </div>
              ))}
         </div>
 
-        {/* TRACKS SCROLL AREA */}
-        <div className="timeline-scroll-area flex-1 overflow-x-auto overflow-y-hidden relative custom-scrollbar bg-zinc-950 min-w-0"
+        {/* SCROLL AREA */}
+        <div className="flex-1 overflow-x-auto overflow-y-hidden relative custom-scrollbar bg-zinc-950 min-w-0"
+             ref={scrollContainerRef}
              onClick={(e) => {
-                // Seek logic
-                if((e.target as HTMLElement).classList.contains('timeline-scroll-area') || (e.target as HTMLElement).classList.contains('track-lane')) {
+                if((e.target as HTMLElement).classList.contains('bg-zinc-950') || (e.target as HTMLElement).classList.contains('track-lane')) {
                     const rect = e.currentTarget.getBoundingClientRect();
                     onSeek((e.clientX - rect.left + e.currentTarget.scrollLeft) / zoom);
+                    onSelectClip(null); // Deselect if clicking empty space
                 }
              }}
         >
              {/* RULER */}
-             <div className="h-8 border-b border-border-gray bg-zinc-900/80 sticky top-0 z-10 pointer-events-none w-1250">
-                {Array.from({ length: 200 }).map((_, i) => (
-                    <div key={i} className="absolute bottom-0 h-2 border-l border-gray-600 text-[9px] text-gray-500 pl-1" style={{ left: i * zoom * 5 }}>{i * 5}s</div>
+             <div className="h-9 border-b border-border-gray bg-zinc-900/95 backdrop-blur sticky top-0 z-10 w-1500 cursor-pointer">
+                {rulerTicks.ticks.map((time) => (
+                    <div key={time} className="absolute bottom-0 top-2 border-l border-gray-700/50 pl-1.5 flex flex-col justify-end pb-1" style={{ left: time * zoom }}>
+                        <span className="text-[9px] font-medium text-gray-500 select-none">{time}s</span>
+                    </div>
                 ))}
              </div>
 
-             <div className="w-1250 relative">
+             <div className="w-1500 relative">
                 <div className="absolute inset-0 pointer-events-none">
-                     {Array.from({ length: 300 }).map((_, i) => (
-                        <div key={i} className="absolute top-0 bottom-0 border-l border-white/5" style={{ left: i * zoom * 5 }} />
+                     {rulerTicks.ticks.map((time) => (
+                        <div key={time} className="absolute top-0 bottom-0 border-l border-white/5" style={{ left: time * zoom }} />
                     ))}
                 </div>
 
@@ -247,27 +348,40 @@ export default function Timeline({
                         {track.clips.map(clip => {
                             const isSelected = selectedClipId === clip.id;
                             const isDragging = dragState.clipId === clip.id;
-                            const color = track.type==='video'?"bg-blue-900/90 border-blue-500":track.type==='audio'?"bg-emerald-900/90 border-emerald-500":"bg-amber-900/90 border-amber-500";
                             
+                            const baseStyle = track.type === 'video' 
+                                ? "bg-gradient-to-r from-blue-900/80 to-blue-800/80 border-blue-500/50" 
+                                : track.type === 'audio' 
+                                ? "bg-gradient-to-r from-emerald-900/80 to-emerald-800/80 border-emerald-500/50" 
+                                : "bg-gradient-to-r from-amber-900/80 to-amber-800/80 border-amber-500/50";
+
                             return (
                               <div
-                                  key={clip.id}
+                                  key={clip.id} // This ID must be unique after split!
                                   className={cn(
-                                      "absolute top-2 bottom-2 rounded-md border shadow-md group select-none",
-                                      color,
-                                      isSelected ? "ring-2 ring-white z-10" : "z-0",
-                                      isDragging && "opacity-80 scale-[1.01] shadow-xl z-50 cursor-grabbing"
+                                      "absolute top-2 bottom-2 rounded-sm border shadow-sm group select-none overflow-hidden transition-shadow",
+                                      baseStyle,
+                                      isSelected ? "ring-2 ring-white z-20 brightness-110" : "z-10",
+                                      isDragging && "opacity-90 scale-[1.01] shadow-2xl z-50 cursor-grabbing ring-1 ring-electric-red"
                                   )}
                                   style={{ left: clip.start * zoom, width: clip.duration * zoom }}
                                   onMouseDown={(e) => handleMouseDown(e, clip, track.id, "MOVE")}
                               >
-                                  {/* Trim Handles */}
-                                  <div className="absolute left-0 top-0 bottom-0 w-2 cursor-w-resize hover:bg-white/40 z-20" onMouseDown={(e) => handleMouseDown(e, clip, track.id, "TRIM_LEFT")} />
-                                  <div className="absolute right-0 top-0 bottom-0 w-2 cursor-e-resize hover:bg-white/40 z-20" onMouseDown={(e) => handleMouseDown(e, clip, track.id, "TRIM_RIGHT")} />
+                                  {/* Left Handle */}
+                                  <div className="absolute left-0 top-0 bottom-0 w-3 cursor-w-resize hover:bg-white/20 z-30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                    onMouseDown={(e) => handleMouseDown(e, clip, track.id, "TRIM_LEFT")}>
+                                     <div className="w-0.75 h-4 bg-white/70 rounded-full shadow-sm" />
+                                  </div>
                                   
-                                  <div className="w-full h-full px-3 flex flex-col justify-center pointer-events-none overflow-hidden">
-                                      <span className="text-[10px] font-bold text-white truncate">{clip.name}</span>
-                                      <span className="text-[8px] text-white/70">{clip.duration.toFixed(1)}s</span>
+                                  {/* Right Handle */}
+                                  <div className="absolute right-0 top-0 bottom-0 w-3 cursor-e-resize hover:bg-white/20 z-30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                    onMouseDown={(e) => handleMouseDown(e, clip, track.id, "TRIM_RIGHT")}>
+                                      <div className="w-0.75 h-4 bg-white/70 rounded-full shadow-sm" />
+                                  </div>
+
+                                  <div className="w-full h-full px-3 flex flex-col justify-center pointer-events-none">
+                                      <span className="text-[10px] font-bold text-white/90 truncate drop-shadow-md">{clip.name}</span>
+                                      <span className="text-[9px] text-white/50 font-mono mt-0.5">{clip.duration.toFixed(1)}s</span>
                                   </div>
                               </div>
                             );
@@ -275,9 +389,11 @@ export default function Timeline({
                     </div>
                 ))}
 
-                {/* Playhead */}
-                <div className="absolute top-0 bottom-0 w-px bg-electric-red z-50 pointer-events-none" style={{ transform: `translateX(${currentTime * zoom}px)` }}>
-                    <div className="absolute -top-3 -left-1.5 w-3 h-3 bg-electric-red rotate-45 shadow-[0_0_8px_#FF2E4D]" />
+                {/* PLAYHEAD */}
+                <div className="absolute top-0 bottom-0 z-50 pointer-events-none transition-transform duration-30 linear will-change-transform"
+                     style={{ transform: `translateX(${currentTime * zoom}px)` }}>
+                    <div className="w-px h-full bg-electric-red shadow-[0_0_8px_rgba(255,46,77,0.8)]" />
+                    <div className="absolute top-0 -left-1.5 w-3 h-3 bg-electric-red" style={{ clipPath: "polygon(0% 0%, 100% 0%, 50% 100%)"}} />
                 </div>
              </div>
         </div>

@@ -9,8 +9,8 @@ import Player from "@/components/editor/Player";
 import Timeline, { Track, Clip } from "@/components/editor/Timeline";
 
 const INITIAL_TRACKS: Track[] = [
-  { id: "V1", type: "video", name: "Video Track", clips: [] },
-  { id: "T1", type: "text",  name: "Text Track", clips: [] },
+  { id: "V1", type: "video", name: "Main Video", clips: [] },
+  { id: "T1", type: "text",  name: "Text Overlay", clips: [] },
   { id: "A1", type: "audio", name: "Audio Track", clips: [] },
 ];
 
@@ -23,32 +23,14 @@ export default function EditorPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
 
-  // --- RIPPLE ALGORITHM ---
-  // Ensures clips don't overlap by pushing neighbors to the right
-  const applyRipple = (trackClips: Clip[], activeClipId: string): Clip[] => {
-     // 1. Sort by start time
-     const sorted = [...trackClips].sort((a, b) => a.start - b.start);
-     const active = sorted.find(c => c.id === activeClipId);
-     if (!active) return trackClips;
+  // --- 1. FREE MOVE (No Snap/Ripple by default) ---
+  // We allow clips to be moved anywhere. We only check for pure overlap to avoid visual bugs if you want.
+  // For "Free Movement", we basically just trust the new Start Time.
+  // To implement "Push" behavior (Premiere's Ripple Edit), we'd need a specific tool mode.
+  // Standard Arrow Tool = Overwrite or Gap Allowed.
 
-     let cursor = active.start + active.duration;
+  // --- 2. ACTIONS ---
 
-     // 2. Push anything that overlaps
-     return sorted.map(clip => {
-         if (clip.id === activeClipId) return clip;
-         if (clip.start < cursor) {
-             // It overlaps! Push it.
-             const pushedClip = { ...clip, start: cursor };
-             cursor = pushedClip.start + pushedClip.duration;
-             return pushedClip;
-         }
-         // No overlap, update cursor for next gap check
-         if (clip.start > cursor) cursor = clip.start + clip.duration;
-         return clip;
-     });
-  };
-
-  // 1. DROP NEW CLIP
   const handleDropNewClip = (trackId: string, clipData: any, time: number) => {
     const newClip: Clip = {
         id: Math.random().toString(36).substr(2, 9),
@@ -61,9 +43,7 @@ export default function EditorPage() {
 
     setTracks(prev => prev.map(t => {
         if(t.id === trackId) {
-            const withNew = [...t.clips, newClip];
-            // Apply ripple so dropping in middle pushes others
-            return { ...t, clips: applyRipple(withNew, newClip.id) };
+            return { ...t, clips: [...t.clips, newClip] };
         }
         return t;
     }));
@@ -72,23 +52,23 @@ export default function EditorPage() {
     setSelectedClipId(newClip.id);
   };
 
-  // 2. UPDATE CLIP (Move/Trim)
   const handleUpdateClip = (trackId: string, clipId: string, updates: Partial<Clip>) => {
     setTracks(prev => prev.map(t => {
         if(t.id === trackId) {
-            const updatedClips = t.clips.map(c => c.id === clipId ? { ...c, ...updates } : c);
-            return { ...t, clips: applyRipple(updatedClips, clipId) };
+            return { 
+                ...t, 
+                clips: t.clips.map(c => c.id === clipId ? { ...c, ...updates } : c)
+            };
         }
         return t;
     }));
   };
 
-  // 3. SWITCH TRACK
   const handleSwitchTrack = (clipId: string, oldTrackId: string, newTrackId: string, newStart: number) => {
     let clipToMove: Clip | undefined;
 
-    // Remove
-    const afterRemove = tracks.map(t => {
+    // Remove from old
+    const tempTracks = tracks.map(t => {
         if(t.id === oldTrackId) {
             clipToMove = t.clips.find(c => c.id === clipId);
             return { ...t, clips: t.clips.filter(c => c.id !== clipId) };
@@ -98,18 +78,64 @@ export default function EditorPage() {
 
     if(!clipToMove) return;
 
-    // Add
-    setTracks(afterRemove.map(t => {
+    // Add to new
+    setTracks(tempTracks.map(t => {
         if(t.id === newTrackId) {
-            const moved = { ...clipToMove!, start: newStart };
-            const withMoved = [...t.clips, moved];
-            return { ...t, clips: applyRipple(withMoved, clipId) };
+            return { ...t, clips: [...t.clips, { ...clipToMove!, start: newStart }] };
         }
         return t;
     }));
   };
 
-  // 4. SELECTION
+  // --- CRITICAL: SPLIT LOGIC ---
+  const handleSplitClip = (trackId: string, clipId: string, splitTime: number) => {
+    setTracks(prev => prev.map(track => {
+       if (track.id !== trackId) return track;
+
+       const originalClip = track.clips.find(c => c.id === clipId);
+       if (!originalClip) return track;
+
+       // Calculate cut point relative to clip start
+       const offset = splitTime - originalClip.start;
+       
+       // Validity check: Cut must be inside the clip
+       if (offset <= 0 || offset >= originalClip.duration) return track;
+
+       // 1. Create Left Segment (Keeps original ID to maintain selection if desired, or new ID)
+       // Let's give BOTH new IDs to avoid "stuck" React states, or keep left as original.
+       // Keeping left as original is safer for React transitions usually.
+       const leftClip = {
+           ...originalClip,
+           duration: offset
+       };
+
+       // 2. Create Right Segment (Must have NEW ID)
+       const rightClip = {
+           ...originalClip,
+           id: Math.random().toString(36).substr(2, 9) + "_split", // Unique ID
+           start: splitTime,
+           duration: originalClip.duration - offset,
+           name: originalClip.name // Optional: + " (Part 2)"
+       };
+
+       // Replace original with these two
+       const newClips = track.clips.filter(c => c.id !== clipId);
+       newClips.push(leftClip, rightClip);
+
+       return { ...track, clips: newClips };
+    }));
+  };
+
+  const handleDeleteClip = (trackId: string, clipId: string) => {
+     setTracks(prev => prev.map(t => {
+         if(t.id === trackId) {
+             return { ...t, clips: t.clips.filter(c => c.id !== clipId) };
+         }
+         return t;
+     }));
+     setSelectedClipId(null);
+  };
+
   const handleSelectClip = (id: string | null) => {
     setSelectedClipId(id);
     if(id) {
@@ -141,7 +167,9 @@ export default function EditorPage() {
                   onDropNewClip={handleDropNewClip} 
                   onUpdateClip={handleUpdateClip}
                   onSwitchTrack={handleSwitchTrack}
-                  selectedClipId={selectedClipId ?? undefined}
+                  onSplitClip={handleSplitClip}
+                  onDeleteClip={handleDeleteClip}
+                  selectedClipId={selectedClipId ?? undefined} 
                   onSelectClip={handleSelectClip}
                />
             </div>
