@@ -1,7 +1,7 @@
 // app/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Sidebar, { ToolId } from "@/components/editor/Sidebar";
 import TopBar from "@/components/editor/TopBar";
 import ToolsPanel from "@/components/editor/ToolsPanel";
@@ -16,133 +16,103 @@ const INITIAL_TRACKS: Track[] = [
 
 export default function EditorPage() {
   const [activeTool, setActiveTool] = useState<ToolId>("media");
-  const [selectedMediaUrl, setSelectedMediaUrl] = useState<string | null>(null);
-  
   const [tracks, setTracks] = useState<Track[]>(INITIAL_TRACKS);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
 
-  // --- 1. FREE MOVE (No Snap/Ripple by default) ---
-  // We allow clips to be moved anywhere. We only check for pure overlap to avoid visual bugs if you want.
-  // For "Free Movement", we basically just trust the new Start Time.
-  // To implement "Push" behavior (Premiere's Ripple Edit), we'd need a specific tool mode.
-  // Standard Arrow Tool = Overwrite or Gap Allowed.
+  // --- PLAYER STATE ---
+  const [playerSrc, setPlayerSrc] = useState<string | null>(null);
+  const [playerClipStart, setPlayerClipStart] = useState(0);
+  const [playerClipOffset, setPlayerClipOffset] = useState(0);
 
-  // --- 2. ACTIONS ---
+  // --- ENGINE: CALCULATE WHAT TO PLAY ---
+  useEffect(() => {
+     const videoTrack = tracks.find(t => t.type === 'video');
+     if (videoTrack) {
+        // Find clip under playhead
+        const activeClip = videoTrack.clips.find(clip => 
+            currentTime >= clip.start && currentTime < (clip.start + clip.duration)
+        );
+
+        if (activeClip && activeClip.url) {
+            setPlayerSrc(activeClip.url);
+            setPlayerClipStart(activeClip.start);
+            setPlayerClipOffset(activeClip.offset); // PASS THE OFFSET
+        } else {
+            if (playerSrc !== null) setPlayerSrc(null); // Black screen
+        }
+     }
+  }, [currentTime, tracks, playerSrc]);
+
+  // --- ACTIONS ---
 
   const handleDropNewClip = (trackId: string, clipData: any, time: number) => {
     const newClip: Clip = {
         id: Math.random().toString(36).substr(2, 9),
         name: clipData.name,
         start: time,
-        duration: clipData.duration || 5,
+        duration: clipData.duration || 10,
+        offset: 0, // Starts at beginning of file
         url: clipData.url,
         type: clipData.type
     };
-
-    setTracks(prev => prev.map(t => {
-        if(t.id === trackId) {
-            return { ...t, clips: [...t.clips, newClip] };
-        }
-        return t;
-    }));
-    
-    if(newClip.url && newClip.type !== 'text') setSelectedMediaUrl(newClip.url);
+    setTracks(prev => prev.map(t => t.id === trackId ? { ...t, clips: [...t.clips, newClip] } : t));
     setSelectedClipId(newClip.id);
+    setCurrentTime(time);
   };
 
   const handleUpdateClip = (trackId: string, clipId: string, updates: Partial<Clip>) => {
-    setTracks(prev => prev.map(t => {
-        if(t.id === trackId) {
-            return { 
-                ...t, 
-                clips: t.clips.map(c => c.id === clipId ? { ...c, ...updates } : c)
-            };
-        }
-        return t;
-    }));
+    setTracks(prev => prev.map(t => 
+        t.id === trackId ? { ...t, clips: t.clips.map(c => c.id === clipId ? { ...c, ...updates } : c) } : t
+    ));
   };
 
   const handleSwitchTrack = (clipId: string, oldTrackId: string, newTrackId: string, newStart: number) => {
     let clipToMove: Clip | undefined;
-
-    // Remove from old
-    const tempTracks = tracks.map(t => {
+    const temp = tracks.map(t => {
         if(t.id === oldTrackId) {
             clipToMove = t.clips.find(c => c.id === clipId);
             return { ...t, clips: t.clips.filter(c => c.id !== clipId) };
         }
         return t;
     });
-
     if(!clipToMove) return;
-
-    // Add to new
-    setTracks(tempTracks.map(t => {
-        if(t.id === newTrackId) {
-            return { ...t, clips: [...t.clips, { ...clipToMove!, start: newStart }] };
-        }
-        return t;
-    }));
+    setTracks(temp.map(t => t.id === newTrackId ? { ...t, clips: [...t.clips, { ...clipToMove!, start: newStart }] } : t));
   };
 
-  // --- CRITICAL: SPLIT LOGIC ---
+  // --- SPLIT LOGIC (THE FIX) ---
   const handleSplitClip = (trackId: string, clipId: string, splitTime: number) => {
     setTracks(prev => prev.map(track => {
        if (track.id !== trackId) return track;
-
        const originalClip = track.clips.find(c => c.id === clipId);
        if (!originalClip) return track;
 
-       // Calculate cut point relative to clip start
-       const offset = splitTime - originalClip.start;
-       
-       // Validity check: Cut must be inside the clip
-       if (offset <= 0 || offset >= originalClip.duration) return track;
+       const splitPointOffset = splitTime - originalClip.start; // How far into the clip we are
+       if (splitPointOffset <= 0 || splitPointOffset >= originalClip.duration) return track;
 
-       // 1. Create Left Segment (Keeps original ID to maintain selection if desired, or new ID)
-       // Let's give BOTH new IDs to avoid "stuck" React states, or keep left as original.
-       // Keeping left as original is safer for React transitions usually.
-       const leftClip = {
-           ...originalClip,
-           duration: offset
+       // Left Clip: Duration shortens, Offset stays same
+       const leftClip = { 
+           ...originalClip, 
+           duration: splitPointOffset 
        };
 
-       // 2. Create Right Segment (Must have NEW ID)
-       const rightClip = {
-           ...originalClip,
-           id: Math.random().toString(36).substr(2, 9) + "_split", // Unique ID
-           start: splitTime,
-           duration: originalClip.duration - offset,
-           name: originalClip.name // Optional: + " (Part 2)"
+       // Right Clip: Start moves, Duration remainder, OFFSET INCREASES
+       const rightClip = { 
+           ...originalClip, 
+           id: Math.random().toString(36).substr(2, 9) + "_split", 
+           start: splitTime, 
+           duration: originalClip.duration - splitPointOffset,
+           offset: originalClip.offset + splitPointOffset // <-- MAGIC FIX
        };
 
-       // Replace original with these two
-       const newClips = track.clips.filter(c => c.id !== clipId);
-       newClips.push(leftClip, rightClip);
-
-       return { ...track, clips: newClips };
+       return { ...track, clips: track.clips.filter(c => c.id !== clipId).concat([leftClip, rightClip]) };
     }));
   };
 
   const handleDeleteClip = (trackId: string, clipId: string) => {
-     setTracks(prev => prev.map(t => {
-         if(t.id === trackId) {
-             return { ...t, clips: t.clips.filter(c => c.id !== clipId) };
-         }
-         return t;
-     }));
+     setTracks(prev => prev.map(t => t.id === trackId ? { ...t, clips: t.clips.filter(c => c.id !== clipId) } : t));
      setSelectedClipId(null);
-  };
-
-  const handleSelectClip = (id: string | null) => {
-    setSelectedClipId(id);
-    if(id) {
-        let foundUrl = null;
-        tracks.forEach(t => t.clips.forEach(c => { if(c.id === id) foundUrl = c.url }));
-        if(foundUrl) setSelectedMediaUrl(foundUrl);
-    }
   };
 
   return (
@@ -151,10 +121,19 @@ export default function EditorPage() {
       <div className="flex-1 flex flex-col min-w-0 bg-bg-black">
         <TopBar />
         <div className="flex-1 flex overflow-hidden">
-          <ToolsPanel activeTool={activeTool} onMediaSelect={(url) => { setSelectedMediaUrl(url); setCurrentTime(0); }} />
+          <ToolsPanel activeTool={activeTool} /> 
           <div className="flex-1 flex flex-col min-w-0 bg-bg-black relative">
             <div className="flex-1 flex min-h-0">
-               <Player src={selectedMediaUrl} currentTime={currentTime} isPlaying={isPlaying} onTimeUpdate={setCurrentTime} onDurationChange={()=>{}} onTogglePlay={() => setIsPlaying(!isPlaying)} />
+               <Player 
+                  src={playerSrc} 
+                  currentTime={currentTime} 
+                  isPlaying={isPlaying} 
+                  onTimeUpdate={setCurrentTime} 
+                  onDurationChange={()=>{}} 
+                  onTogglePlay={() => setIsPlaying(!isPlaying)}
+                  clipStartTime={playerClipStart}
+                  clipOffset={playerClipOffset} // PASS TO PLAYER
+               />
                <div className="w-75 bg-bg-dark border-l border-border-gray hidden xl:flex flex-col shrink-0">
                   <div className="p-4 border-b border-border-gray/50 h-14 flex items-center"><h2 className="text-gray-500 text-[11px] font-bold uppercase">AI Assistant</h2></div>
                </div>
@@ -169,8 +148,8 @@ export default function EditorPage() {
                   onSwitchTrack={handleSwitchTrack}
                   onSplitClip={handleSplitClip}
                   onDeleteClip={handleDeleteClip}
-                  selectedClipId={selectedClipId ?? undefined} 
-                  onSelectClip={handleSelectClip}
+                  selectedClipId={selectedClipId ?? undefined}
+                  onSelectClip={setSelectedClipId}
                />
             </div>
           </div>
