@@ -1,3 +1,4 @@
+// components/editor/ToolsPanel.tsx
 "use client";
 
 import { useState, useRef } from "react";
@@ -9,8 +10,10 @@ import {
   FolderOpen,
   MessageSquare,
   Captions,
+  Loader2, // Added loader icon
 } from "lucide-react";
 import { ToolId } from "./Sidebar";
+import { cn } from "@/lib/utils";
 
 // ================= TYPES =================
 export type MediaFile = {
@@ -29,60 +32,81 @@ interface ToolsPanelProps {
 const MediaPanel = ({ onSelect }: { onSelect?: (url: string) => void }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<MediaFile[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
 
-  // ---- FILE UPLOAD ----
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return;
+  // ---- FILE UPLOAD (BACKEND INTEGRATION) ----
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
 
-    Array.from(e.target.files).forEach((file) => {
-      const url = URL.createObjectURL(file);
+    const file = e.target.files[0]; // Handle single file for simplicity first
+    setIsUploading(true);
 
-      // 🎥 VIDEO
+    try {
+      // 1. Prepare FormData
+      const formData = new FormData();
+      formData.append("file", file);
+
+      // 2. Upload to Python Backend
+      const response = await fetch("http://localhost:8000/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error("Backend upload failed");
+
+      const data = await response.json();
+      const serverUrl = data.url; // e.g., http://localhost:8000/files/video.mp4
+
+      // 3. Process Metadata (Duration)
       if (file.type.startsWith("video")) {
-        const video = document.createElement("video");
-        video.src = url;
-        video.onloadedmetadata = () => {
+        const tempVideo = document.createElement("video");
+        tempVideo.src = serverUrl;
+        tempVideo.onloadedmetadata = () => {
           setFiles((prev) => [
             ...prev,
             {
               name: file.name,
               type: "video",
-              url,
-              duration: video.duration || 10,
+              url: serverUrl, // Use REAL Server URL
+              duration: tempVideo.duration || 10,
             },
           ]);
+          setIsUploading(false);
         };
-      }
-      // 🖼 IMAGE
-      else {
+      } else {
+        // Images
         setFiles((prev) => [
           ...prev,
           {
             name: file.name,
             type: "image",
-            url,
+            url: serverUrl,
             duration: 5,
           },
         ]);
+        setIsUploading(false);
       }
-    });
+    } catch (error) {
+      console.error("Upload error:", error);
+      alert("Error uploading to backend. Is 'python main.py' running?");
+      setIsUploading(false);
+    }
   };
 
   // ---- 🔥 CRITICAL: DRAG TO TIMELINE ----
   const handleDragStart = (e: React.DragEvent, file: MediaFile) => {
+    // We attach the JSON data so the Timeline knows what to render
     e.dataTransfer.setData("application/json", JSON.stringify(file));
     e.dataTransfer.effectAllowed = "copy";
   };
 
   return (
     <div className="flex flex-col h-full bg-black/40">
-
       {/* Hidden File Input */}
       <input
         ref={fileInputRef}
         type="file"
         hidden
-        multiple
         accept="image/*,video/*"
         onChange={handleFileChange}
       />
@@ -91,19 +115,29 @@ const MediaPanel = ({ onSelect }: { onSelect?: (url: string) => void }) => {
       <div className="p-4 shrink-0">
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="
-            w-full py-3 rounded-xl
-            border-2 border-dashed border-neutral-700
-            flex items-center justify-center gap-3
-            transition-all
-            hover:border-electric-red
-            group
-          "
+          disabled={isUploading}
+          className={cn(
+            "w-full py-3 rounded-xl border-2 border-dashed border-neutral-700 flex items-center justify-center gap-3 transition-all group",
+            isUploading
+              ? "opacity-50 cursor-not-allowed border-neutral-800"
+              : "hover:border-electric-red hover:bg-electric-red/5 cursor-pointer"
+          )}
         >
-          <Plus className="w-5 h-5 text-neutral-500 group-hover:text-electric-red" />
-          <span className="text-sm font-medium text-neutral-400 group-hover:text-white">
-            Import Media
-          </span>
+          {isUploading ? (
+            <>
+              <Loader2 className="w-5 h-5 text-electric-red animate-spin" />
+              <span className="text-sm font-medium text-neutral-400">
+                Uploading...
+              </span>
+            </>
+          ) : (
+            <>
+              <Plus className="w-5 h-5 text-neutral-500 group-hover:text-electric-red transition-colors" />
+              <span className="text-sm font-medium text-neutral-400 group-hover:text-white transition-colors">
+                Import Media
+              </span>
+            </>
+          )}
         </button>
       </div>
 
@@ -112,7 +146,7 @@ const MediaPanel = ({ onSelect }: { onSelect?: (url: string) => void }) => {
         {files.length === 0 ? (
           <div className="mt-12 text-center text-neutral-500 select-none">
             <Film className="w-12 h-12 mx-auto mb-3 opacity-40" />
-            <p className="text-xs">No media uploaded</p>
+            <p className="text-xs tracking-wide">No media uploaded</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
@@ -151,11 +185,11 @@ const MediaPanel = ({ onSelect }: { onSelect?: (url: string) => void }) => {
                   transition-opacity
                   flex items-center justify-center
                 ">
-                  <Play className="w-7 h-7 text-white fill-white/20" />
+                  <Play className="w-8 h-8 text-white fill-white/20" />
                 </div>
 
                 {/* Filename */}
-                <div className="absolute bottom-0 w-full px-2 py-1 bg-black/80 text-[9px] text-white truncate">
+                <div className="absolute bottom-0 w-full px-2 py-1 bg-linear-to-t from-black/90 to-transparent text-[9px] text-white truncate">
                   {file.name}
                 </div>
               </div>
@@ -169,7 +203,22 @@ const MediaPanel = ({ onSelect }: { onSelect?: (url: string) => void }) => {
 
 // ================= OTHER PANELS =================
 const CopilotPanel = () => (
-  <div className="p-4 text-gray-400">Copilot Panel</div>
+  <div className="p-4 flex flex-col h-full">
+    <div className="flex-1 bg-black/20 rounded-lg border border-white/5 p-4 mb-4">
+      <div className="flex gap-3 text-sm text-neutral-400">
+        <div className="w-6 h-6 rounded-full bg-electric-red/20 flex items-center justify-center shrink-0">
+            <Sparkles className="w-3 h-3 text-electric-red"/>
+        </div>
+        <p>I can help you edit. Try asking "Remove silence" or "Add captions".</p>
+      </div>
+    </div>
+    <div className="relative">
+        <input 
+            className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-electric-red" 
+            placeholder="Ask AI..."
+        />
+    </div>
+  </div>
 );
 
 const PlaceholderPanel = ({
@@ -181,7 +230,7 @@ const PlaceholderPanel = ({
 }) => (
   <div className="flex flex-col items-center justify-center h-full opacity-40">
     <Icon className="w-10 h-10 mb-2" />
-    <p className="text-xs">{title}</p>
+    <p className="text-xs font-medium tracking-wide">{title}</p>
   </div>
 );
 
@@ -201,14 +250,14 @@ export default function ToolsPanel({
   };
 
   return (
-    <div className="w-[320px] bg-bg-dark border-r border-border-gray flex flex-col shrink-0 z-10">
-      <div className="p-4 border-b border-border-gray/50 h-14 flex items-center">
+    <div className="w-[320px] bg-bg-dark border-r border-border-gray flex flex-col shrink-0 z-10 transition-all">
+      <div className="p-4 border-b border-border-gray/50 h-14 flex items-center justify-between">
         <h2 className="text-text-secondary text-[11px] uppercase tracking-[0.2em] font-bold">
           {titles[activeTool] || "Tool"}
         </h2>
       </div>
 
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden bg-bg-dark">
         {activeTool === "media" && <MediaPanel onSelect={onMediaSelect} />}
         {activeTool === "copilot" && <CopilotPanel />}
         {activeTool === "magic-assets" && (
