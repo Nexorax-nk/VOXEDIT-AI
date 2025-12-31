@@ -156,6 +156,65 @@ async def process_video(input_path: str, actions: list, clip_start: float = 0.0,
         print(f"General Error: {str(e)}")
         return None
 
+# ==========================================
+# 🎬 NEW FUNCTION: STITCH VIDEOS (EXPORT)
+# ==========================================
+async def stitch_videos(clips: list):
+    """
+    Takes a list of clip metadata: [{ "filename": "...", "duration": ... }]
+    Concatenates them into a single final video.
+    """
+    output_filename = f"final_render_{uuid.uuid4()}.mp4"
+    output_path = os.path.join(TEMP_DIR, output_filename)
+    
+    # Create a list of input streams
+    inputs = []
+    try:
+        for clip in clips:
+            file_path = os.path.join(TEMP_DIR, clip["filename"])
+            if not os.path.exists(file_path):
+                print(f"⚠️ Warning: Clip not found {file_path}, skipping.")
+                continue
+            
+            # Input the file
+            # We force audio channels to avoid mismatch errors (ac=2)
+            inp = ffmpeg.input(file_path)
+            inputs.append(inp)
+
+        if not inputs:
+            print("❌ No valid inputs found for stitching.")
+            return None
+
+        print(f"🧵 Stitching {len(inputs)} clips...")
+
+        # FFmpeg Concat Filter
+        # v=1, a=1 means output 1 video track and 1 audio track
+        # unsafe=1 allows concatenating files with slightly different parameters
+        joined = ffmpeg.concat(*inputs, v=1, a=1, unsafe=1).node
+        
+        v = joined[0]
+        a = joined[1]
+
+        job = ffmpeg.output(v, a, output_path, vcodec='libx264', preset='fast', movflags='faststart')
+        job.run(overwrite_output=True, capture_stderr=True)
+        
+        print(f"--- Render Success! Saved to {output_path} ---")
+        return output_path
+
+    except Exception as e:
+        print(f"Render Error: {e}")
+        # Fallback: Try rendering video only if audio concat fails
+        try:
+            print("⚠️ Audio stitching failed. Retrying video-only render...")
+            video_inputs = [i.video for i in inputs]
+            joined = ffmpeg.concat(*video_inputs, v=1, a=0, unsafe=1).node
+            job = ffmpeg.output(joined[0], output_path, vcodec='libx264', preset='fast')
+            job.run(overwrite_output=True)
+            return output_path
+        except Exception as e2:
+            print(f"❌ Fatal Render Error: {e2}")
+            return None
+
 # =========================
 # LOCAL TEST RUNNER
 # =========================

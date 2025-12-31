@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Sidebar, { ToolId } from "@/components/editor/Sidebar";
 import TopBar from "@/components/editor/TopBar";
 import ToolsPanel from "@/components/editor/ToolsPanel";
@@ -21,6 +21,9 @@ export default function EditorPage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  
+  // --- EXPORT STATE ---
+  const [isExporting, setIsExporting] = useState(false);
 
   // --- PLAYER STATE ---
   const [playerSrc, setPlayerSrc] = useState<string | null>(null);
@@ -193,12 +196,64 @@ export default function EditorPage() {
     setPlayerClipOffset(0);
   };
 
+  // --- EXPORT LOGIC ---
+  const handleExport = async () => {
+      // 1. Get clips from the main video track
+      const videoTrack = tracks.find(t => t.type === 'video');
+      if (!videoTrack || videoTrack.clips.length === 0) {
+          alert("No clips to export!");
+          return;
+      }
+
+      // 2. Sort clips by start time (Timeline Order)
+      const sortedClips = [...videoTrack.clips].sort((a, b) => a.start - b.start);
+
+      // 3. Prepare data for backend
+      // We need to extract the actual filename from the URL to tell backend what to stitch
+      const clipData = sortedClips.map(c => ({
+          filename: c.url?.split("/").pop() || "",
+          duration: c.duration
+      }));
+
+      setIsExporting(true);
+
+      try {
+          const formData = new FormData();
+          formData.append("project_data", JSON.stringify(clipData));
+
+          const res = await fetch("http://localhost:8000/render", {
+              method: "POST",
+              body: formData
+          });
+
+          const data = await res.json();
+
+          if (data.status === "success") {
+              // Trigger Browser Download
+              const link = document.createElement('a');
+              link.href = data.url;
+              link.download = "voxedit_final.mp4";
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+          } else {
+              alert("Export failed: " + data.message);
+          }
+      } catch (e) {
+          console.error(e);
+          alert("Export failed. Check console.");
+      } finally {
+          setIsExporting(false);
+      }
+  };
+
   return (
     <main className="flex h-screen w-screen bg-bg-black overflow-hidden text-text-primary font-sans">
       <Sidebar activeTool={activeTool} onChange={setActiveTool} />
       
       <div className="flex-1 flex flex-col min-w-0 bg-bg-black">
-        <TopBar />
+        {/* Pass Export Logic to TopBar */}
+        <TopBar onExport={handleExport} isExporting={isExporting} />
         
         <div className="flex-1 flex overflow-hidden">
           <ToolsPanel 
@@ -215,7 +270,7 @@ export default function EditorPage() {
                   src={playerSrc} 
                   currentTime={currentTime} 
                   isPlaying={isPlaying} 
-                  onTimeUpdate={setCurrentTime} // Player drives time when src exists
+                  onTimeUpdate={setCurrentTime} 
                   onDurationChange={()=>{}} 
                   onTogglePlay={() => setIsPlaying(!isPlaying)}
                   clipStartTime={playerClipStart}

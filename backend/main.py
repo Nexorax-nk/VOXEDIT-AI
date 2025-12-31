@@ -7,10 +7,12 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import io
+import json 
 
-# Import custom services
+# --- IMPORT CUSTOM SERVICES ---
 from services.ai_agent import analyze_command
-from services.video_engine import process_video
+from services.video_engine import process_video, stitch_videos
+from services.voice_gen import generate_voice_reply  # <--- NEW: ElevenLabs Integration
 
 app = FastAPI()
 
@@ -26,6 +28,7 @@ UPLOAD_DIR = "temp_storage"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/files", StaticFiles(directory=UPLOAD_DIR), name="files")
 
+# --- 1. UPLOAD ENDPOINT ---
 @app.post("/upload")
 async def upload_video(file: UploadFile = File(...)):
     file_path = os.path.join(UPLOAD_DIR, file.filename)
@@ -33,7 +36,7 @@ async def upload_video(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
     return {"filename": file.filename, "url": f"http://localhost:8000/files/{file.filename}"}
 
-# --- TEXT COMMAND ENDPOINT ---
+# --- 2. TEXT EDIT ENDPOINT ---
 @app.post("/edit")
 async def edit_video(
     command: str = Form(...), 
@@ -46,24 +49,24 @@ async def edit_video(
     if not os.path.exists(input_path):
         raise HTTPException(status_code=404, detail="File not found")
 
-    # 1. Ask AI
+    # A. Ask AI
     ai_plan = await analyze_command(command)
     actions = ai_plan.get("actions", [])
     explanation = ai_plan.get("explanation", "Processed successfully.")
     
-    # --- LOGIC UPDATE: HANDLE CONVERSATION ---
+    # B. Handle Conversation (No Actions)
     if not actions:
         print("   💬 Conversational response (no edits).")
         return {
             "status": "success",
             "original_file": filename,
-            "processed_url": None, # Signal to frontend that no file changed
+            "processed_url": None,
             "new_duration": None,
-            "explanation": explanation, # The AI's chat answer
+            "explanation": explanation,
             "actions": []
         }
 
-    # 2. Run Engine (Only if there are actions)
+    # C. Run Engine (With Actions)
     print("   ⚙️ executing actions...")
     result = await process_video(input_path, actions, clip_start, clip_duration)
     if not result:
@@ -78,7 +81,7 @@ async def edit_video(
         "actions": actions
     }
 
-# --- 🎤 VOICE COMMAND ENDPOINT ---
+# --- 3. VOICE COMMAND ENDPOINT (WITH ELEVENLABS) ---
 @app.post("/voice-command")
 async def voice_command(
     audio: UploadFile = File(...),
@@ -89,17 +92,17 @@ async def voice_command(
     print("🎤 Receiving Voice Command...")
     
     try:
-        # 1. Save temporary audio file
+        # A. Save & Convert Audio
         temp_audio_path = f"temp_storage/temp_voice_{audio.filename}"
         with open(temp_audio_path, "wb") as buffer:
             shutil.copyfileobj(audio.file, buffer)
 
-        # 2. Convert to WAV
+        # Convert WebM/Audio to WAV for SpeechRecognition
         audio_segment = AudioSegment.from_file(temp_audio_path)
         wav_path = temp_audio_path + ".wav"
         audio_segment.export(wav_path, format="wav")
 
-        # 3. Transcribe
+        # B. Transcribe to Text
         recognizer = sr.Recognizer()
         with sr.AudioFile(wav_path) as source:
             audio_data = recognizer.record(source)
@@ -111,45 +114,79 @@ async def voice_command(
             except sr.RequestError:
                 return {"status": "error", "message": "Speech service unavailable"}
 
-        # Clean up
+        # Clean up temp files
         if os.path.exists(temp_audio_path): os.remove(temp_audio_path)
         if os.path.exists(wav_path): os.remove(wav_path)
 
-        # 4. Ask AI
+        # C. Ask AI
         ai_plan = await analyze_command(text_command)
         actions = ai_plan.get("actions", [])
         explanation = ai_plan.get("explanation", "Processed successfully.")
 
-        # --- LOGIC UPDATE: HANDLE CONVERSATION ---
-        if not actions:
-             print("   💬 Conversational response (no edits).")
-             return {
-                "status": "success",
-                "transcription": text_command,
-                "processed_url": None, # No video update
-                "new_duration": None,
-                "explanation": explanation,
-                "actions": []
-            }
-
-        # 5. Run Engine
-        input_path = os.path.join(UPLOAD_DIR, filename)
-        result = await process_video(input_path, actions, clip_start, clip_duration)
-        if not result:
-            raise HTTPException(status_code=500, detail="Video processing failed")
-
-        new_filename = os.path.basename(result["path"])
+        # --- D. GENERATE VOICE REPLY (ELEVENLABS) ---
+        print(f"   🎙️ Generating AI Voice Reply for: '{explanation}'")
+        voice_reply_path = generate_voice_reply(explanation)
+        voice_reply_url = None
         
-        return {
+        if voice_reply_path:
+            voice_filename = os.path.basename(voice_reply_path)
+            voice_reply_url = f"http://localhost:8000/files/{voice_filename}"
+
+        # E. Prepare Response Data
+        response_data = {
             "status": "success",
             "transcription": text_command,
-            "processed_url": f"http://localhost:8000/files/{new_filename}",
-            "new_duration": result["duration"],
-            "explanation": explanation
+            "explanation": explanation,
+            "reply_audio_url": voice_reply_url, # Frontend plays this!
+            "processed_url": None,
+            "new_duration": None,
+            "actions": actions
         }
+
+        # F. Run Video Engine (Only if needed)
+        if actions:
+            input_path = os.path.join(UPLOAD_DIR, filename)
+            result = await process_video(input_path, actions, clip_start, clip_duration)
+            if result:
+                new_filename = os.path.basename(result["path"])
+                response_data["processed_url"] = f"http://localhost:8000/files/{new_filename}"
+                response_data["new_duration"] = result["duration"]
+            else:
+                # If video processing fails, we still return the voice reply/chat
+                print("   ❌ Video processing failed, but returning chat response.")
+
+        return response_data
 
     except Exception as e:
         print(f"Voice Error: {e}")
+        return {"status": "error", "message": str(e)}
+
+# --- 4. RENDER / EXPORT ENDPOINT ---
+@app.post("/render")
+async def render_project(
+    project_data: str = Form(...) 
+):
+    print("🎬 Received Render Request...")
+    
+    try:
+        clips = json.loads(project_data)
+        if not clips:
+             return {"status": "error", "message": "No clips to render"}
+
+        # Run Stitching Engine
+        output_path = await stitch_videos(clips)
+        
+        if not output_path:
+            raise HTTPException(status_code=500, detail="Render failed")
+
+        new_filename = os.path.basename(output_path)
+        
+        return {
+            "status": "success",
+            "url": f"http://localhost:8000/files/{new_filename}"
+        }
+    except Exception as e:
+        print(f"Render API Error: {e}")
         return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":

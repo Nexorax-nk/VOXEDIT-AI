@@ -263,7 +263,7 @@ const CopilotPanel = ({
                 if (data.status === "error") {
                     setMessages(prev => [...prev, { role: "ai", text: "Error: " + data.message }]);
                 } else {
-                    // Success! Remove placeholder
+                    // 1. Success! Update Chat
                     setMessages(prev => {
                         const newHistory = [...prev];
                         newHistory.pop(); // Remove placeholder
@@ -274,7 +274,14 @@ const CopilotPanel = ({
                         ];
                     });
 
-                    // --- CRITICAL FIX: Only update timeline if URL exists ---
+                    // 2. Play AI Voice Reply (ElevenLabs)
+                    if (data.reply_audio_url) {
+                        console.log("🔊 Playing AI Reply:", data.reply_audio_url);
+                        const audio = new Audio(data.reply_audio_url);
+                        audio.play().catch(e => console.error("Audio Playback Error:", e));
+                    }
+
+                    // 3. Update Video on Timeline (if edits were made)
                     if (data.processed_url && onProcessComplete) {
                         onProcessComplete(data.processed_url, data.new_duration);
                     }
@@ -350,7 +357,8 @@ const CopilotPanel = ({
         } else {
             setMessages(prev => [...prev, { role: "ai", text: data.explanation }]);
             
-            // --- CRITICAL FIX: Only update timeline if URL exists ---
+            // Note: Text edit endpoint doesn't return audio reply URL currently, 
+            // only voice command does.
             if (data.processed_url && onProcessComplete) {
                 onProcessComplete(data.processed_url, data.new_duration);
             }
