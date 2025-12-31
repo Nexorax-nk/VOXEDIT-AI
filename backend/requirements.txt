@@ -5,3 +5,5 @@ google-generativeai
 elevenlabs
 ffmpeg-python
 python-dotenv
+ffmpeg-python
+SpeechRecognition pydub

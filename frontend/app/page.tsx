@@ -1,7 +1,7 @@
 // app/page.tsx
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Sidebar, { ToolId } from "@/components/editor/Sidebar";
 import TopBar from "@/components/editor/TopBar";
 import ToolsPanel from "@/components/editor/ToolsPanel";
@@ -16,6 +16,8 @@ const INITIAL_TRACKS: Track[] = [
 
 export default function EditorPage() {
   const [activeTool, setActiveTool] = useState<ToolId>("media");
+  
+  // --- STATE ---
   const [tracks, setTracks] = useState<Track[]>(INITIAL_TRACKS);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -28,7 +30,9 @@ export default function EditorPage() {
 
   // --- ENGINE: CALCULATE WHAT TO PLAY ---
   useEffect(() => {
+     // We prioritize V1 track for visual preview.
      const videoTrack = tracks.find(t => t.type === 'video');
+     
      if (videoTrack) {
         // Find clip under playhead
         const activeClip = videoTrack.clips.find(clip => 
@@ -36,16 +40,18 @@ export default function EditorPage() {
         );
 
         if (activeClip && activeClip.url) {
-            setPlayerSrc(activeClip.url);
+            // A clip is active!
+            if (playerSrc !== activeClip.url) setPlayerSrc(activeClip.url);
             setPlayerClipStart(activeClip.start);
-            setPlayerClipOffset(activeClip.offset); // PASS THE OFFSET
+            setPlayerClipOffset(activeClip.offset);
         } else {
-            if (playerSrc !== null) setPlayerSrc(null); // Black screen
+            // No clip at this time
+            if (playerSrc !== null) setPlayerSrc(null);
         }
      }
   }, [currentTime, tracks, playerSrc]);
 
-  // --- ACTIONS ---
+  // --- TIMELINE ACTIONS ---
 
   const handleDropNewClip = (trackId: string, clipData: any, time: number) => {
     const newClip: Clip = {
@@ -58,55 +64,65 @@ export default function EditorPage() {
         type: clipData.type
     };
     setTracks(prev => prev.map(t => t.id === trackId ? { ...t, clips: [...t.clips, newClip] } : t));
+    
+    // Auto-select
     setSelectedClipId(newClip.id);
-    setCurrentTime(time);
+    setCurrentTime(time); 
   };
 
   const handleUpdateClip = (trackId: string, clipId: string, updates: Partial<Clip>) => {
     setTracks(prev => prev.map(t => 
-        t.id === trackId ? { ...t, clips: t.clips.map(c => c.id === clipId ? { ...c, ...updates } : c) } : t
+        t.id === trackId 
+            ? { ...t, clips: t.clips.map(c => c.id === clipId ? { ...c, ...updates } : c) } 
+            : t
     ));
   };
 
   const handleSwitchTrack = (clipId: string, oldTrackId: string, newTrackId: string, newStart: number) => {
     let clipToMove: Clip | undefined;
-    const temp = tracks.map(t => {
+    const afterRemove = tracks.map(t => {
         if(t.id === oldTrackId) {
             clipToMove = t.clips.find(c => c.id === clipId);
             return { ...t, clips: t.clips.filter(c => c.id !== clipId) };
         }
         return t;
     });
+
     if(!clipToMove) return;
-    setTracks(temp.map(t => t.id === newTrackId ? { ...t, clips: [...t.clips, { ...clipToMove!, start: newStart }] } : t));
+
+    setTracks(afterRemove.map(t => {
+        if(t.id === newTrackId) {
+            return { ...t, clips: [...t.clips, { ...clipToMove!, start: newStart }] };
+        }
+        return t;
+    }));
   };
 
-  // --- SPLIT LOGIC (THE FIX) ---
+  // --- SPLIT LOGIC ---
   const handleSplitClip = (trackId: string, clipId: string, splitTime: number) => {
     setTracks(prev => prev.map(track => {
        if (track.id !== trackId) return track;
        const originalClip = track.clips.find(c => c.id === clipId);
        if (!originalClip) return track;
 
-       const splitPointOffset = splitTime - originalClip.start; // How far into the clip we are
-       if (splitPointOffset <= 0 || splitPointOffset >= originalClip.duration) return track;
+       const offset = splitTime - originalClip.start;
+       if (offset <= 0 || offset >= originalClip.duration) return track;
 
-       // Left Clip: Duration shortens, Offset stays same
-       const leftClip = { 
-           ...originalClip, 
-           duration: splitPointOffset 
-       };
-
-       // Right Clip: Start moves, Duration remainder, OFFSET INCREASES
+       // Left Clip
+       const leftClip = { ...originalClip, duration: offset };
+       
+       // Right Clip (New Offset = Old Offset + Cut Amount)
        const rightClip = { 
            ...originalClip, 
            id: Math.random().toString(36).substr(2, 9) + "_split", 
            start: splitTime, 
-           duration: originalClip.duration - splitPointOffset,
-           offset: originalClip.offset + splitPointOffset // <-- MAGIC FIX
+           duration: originalClip.duration - offset,
+           offset: originalClip.offset + offset 
        };
 
-       return { ...track, clips: track.clips.filter(c => c.id !== clipId).concat([leftClip, rightClip]) };
+       const newClips = track.clips.filter(c => c.id !== clipId);
+       newClips.push(leftClip, rightClip);
+       return { ...track, clips: newClips };
     }));
   };
 
@@ -115,14 +131,71 @@ export default function EditorPage() {
      setSelectedClipId(null);
   };
 
+  // --- AI INTEGRATION LOGIC ---
+  
+  // 1. Helper to get the actual Clip Object
+  const getSelectedClipObject = () => {
+    if (!selectedClipId) return null;
+    for (const t of tracks) {
+        const c = t.clips.find(clip => clip.id === selectedClipId);
+        if (c) return c;
+    }
+    return null;
+  };
+
+  // 2. Callback when AI finishes editing
+  // UPDATED: Now accepts newDuration to resize the clip!
+  const handleAiProcessingComplete = (newUrl: string, newDuration: number) => {
+    if (!selectedClipId) return;
+
+    setTracks(prev => prev.map(track => {
+        // Only update the track containing the selected clip
+        if (!track.clips.some(c => c.id === selectedClipId)) return track;
+
+        return {
+            ...track,
+            clips: track.clips.map(c => {
+                if (c.id === selectedClipId) {
+                    return {
+                        ...c,
+                        url: newUrl,   // Use the new rendered file
+                        offset: 0,     // Reset offset (it's a fresh file now)
+                        name: c.name + " (AI)",
+                        
+                        // --- THE KEY FIX ---
+                        // Update the timeline duration to match the new file!
+                        duration: newDuration
+                    };
+                }
+                return c;
+            })
+        };
+    }));
+    
+    // Force player update
+    setPlayerSrc(newUrl);
+    setPlayerClipOffset(0);
+  };
+
   return (
     <main className="flex h-screen w-screen bg-bg-black overflow-hidden text-text-primary font-sans">
       <Sidebar activeTool={activeTool} onChange={setActiveTool} />
+      
       <div className="flex-1 flex flex-col min-w-0 bg-bg-black">
         <TopBar />
+        
         <div className="flex-1 flex overflow-hidden">
-          <ToolsPanel activeTool={activeTool} /> 
+          {/* TOOLS PANEL with AI connection */}
+          <ToolsPanel 
+             activeTool={activeTool} 
+             onMediaSelect={(url) => { /* Optional: Handles media library clicks */ }} 
+             selectedClip={getSelectedClipObject()}
+             onUpdateProcessedClip={handleAiProcessingComplete}
+          />
+          
           <div className="flex-1 flex flex-col min-w-0 bg-bg-black relative">
+            
+            {/* PLAYER */}
             <div className="flex-1 flex min-h-0">
                <Player 
                   src={playerSrc} 
@@ -132,12 +205,14 @@ export default function EditorPage() {
                   onDurationChange={()=>{}} 
                   onTogglePlay={() => setIsPlaying(!isPlaying)}
                   clipStartTime={playerClipStart}
-                  clipOffset={playerClipOffset} // PASS TO PLAYER
+                  clipOffset={playerClipOffset}
                />
                <div className="w-75 bg-bg-dark border-l border-border-gray hidden xl:flex flex-col shrink-0">
                   <div className="p-4 border-b border-border-gray/50 h-14 flex items-center"><h2 className="text-gray-500 text-[11px] font-bold uppercase">AI Assistant</h2></div>
                </div>
             </div>
+
+            {/* TIMELINE */}
             <div className="h-87.5 flex flex-col shrink-0 z-10 border-t border-border-gray relative">
                <Timeline 
                   tracks={tracks} 
@@ -152,6 +227,7 @@ export default function EditorPage() {
                   onSelectClip={setSelectedClipId}
                />
             </div>
+
           </div>
         </div>
       </div>

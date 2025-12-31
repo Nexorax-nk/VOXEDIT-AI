@@ -1,4 +1,3 @@
-// components/editor/Timeline.tsx
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
@@ -251,11 +250,30 @@ export default function Timeline({
                             const isSelected = selectedClipId === clip.id;
                             const isDragging = dragState.clipId === clip.id;
                             const baseStyle = track.type === 'video' ? "bg-gradient-to-r from-blue-900/80 to-blue-800/80 border-blue-500/50" : track.type === 'audio' ? "bg-gradient-to-r from-emerald-900/80 to-emerald-800/80 border-emerald-500/50" : "bg-gradient-to-r from-amber-900/80 to-amber-800/80 border-amber-500/50";
+                            
+                            // --- SAFETY CALCULATIONS ---
+                            // Ensure these never resolve to NaN or undefined which crashes React
+                            const safeLeft = (clip.start || 0) * zoom;
+                            const safeWidth = Math.max(0, (clip.duration || 0)) * zoom;
+
                             return (
-                              <div key={clip.id} className={cn("absolute top-2 bottom-2 rounded-sm border shadow-sm group select-none overflow-hidden transition-shadow", baseStyle, isSelected ? "ring-2 ring-white z-20 brightness-110" : "z-10", isDragging && "opacity-90 scale-[1.01] shadow-2xl z-50 cursor-grabbing ring-1 ring-electric-red")} style={{ left: clip.start * zoom, width: clip.duration * zoom }} onMouseDown={(e) => handleMouseDown(e, clip, track.id, "MOVE")}>
+                              <div key={clip.id} 
+                                   className={cn("absolute top-2 bottom-2 rounded-sm border shadow-sm group select-none overflow-hidden transition-shadow", baseStyle, isSelected ? "ring-2 ring-white z-20 brightness-110" : "z-10", isDragging && "opacity-90 scale-[1.01] shadow-2xl z-50 cursor-grabbing ring-1 ring-electric-red")} 
+                                   style={{ 
+                                       left: safeLeft, 
+                                       width: safeWidth 
+                                   }} 
+                                   onMouseDown={(e) => handleMouseDown(e, clip, track.id, "MOVE")}>
+                                  
                                   <div className="absolute left-0 top-0 bottom-0 w-3 cursor-w-resize hover:bg-white/20 z-30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" onMouseDown={(e) => handleMouseDown(e, clip, track.id, "TRIM_LEFT")}><div className="w-0.5 h-4 bg-white/70 rounded-full" /></div>
                                   <div className="absolute right-0 top-0 bottom-0 w-3 cursor-e-resize hover:bg-white/20 z-30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" onMouseDown={(e) => handleMouseDown(e, clip, track.id, "TRIM_RIGHT")}><div className="w-0.5 h-4 bg-white/70 rounded-full" /></div>
-                                  <div className="w-full h-full px-3 flex flex-col justify-center pointer-events-none"><span className="text-[10px] font-bold text-white/90 truncate drop-shadow-md">{clip.name}</span><span className="text-[9px] text-white/50 font-mono mt-0.5">{clip.duration.toFixed(1)}s</span></div>
+                                  
+                                  <div className="w-full h-full px-3 flex flex-col justify-center pointer-events-none">
+                                      <span className="text-[10px] font-bold text-white/90 truncate drop-shadow-md">{clip.name}</span>
+                                      <span className="text-[9px] text-white/50 font-mono mt-0.5">
+                                        {(clip.duration || 0).toFixed(1)}s
+                                      </span>
+                                  </div>
                               </div>
                             );
                         })}

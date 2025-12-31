@@ -1,0 +1,4 @@
+# FFmpeg binaries
+backend/ffmpeg/
+*.dll
+*.exe
