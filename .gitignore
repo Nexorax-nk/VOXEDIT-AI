@@ -2,3 +2,4 @@
 backend/ffmpeg/
 *.dll
 *.exe
+.env
