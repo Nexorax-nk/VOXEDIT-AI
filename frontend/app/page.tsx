@@ -1,7 +1,6 @@
-// app/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Sidebar, { ToolId } from "@/components/editor/Sidebar";
 import TopBar from "@/components/editor/TopBar";
 import ToolsPanel from "@/components/editor/ToolsPanel";
@@ -28,28 +27,59 @@ export default function EditorPage() {
   const [playerClipStart, setPlayerClipStart] = useState(0);
   const [playerClipOffset, setPlayerClipOffset] = useState(0);
 
-  // --- ENGINE: CALCULATE WHAT TO PLAY ---
+  // --- ENGINE 1: CLIP DETECTION ---
   useEffect(() => {
-     // We prioritize V1 track for visual preview.
      const videoTrack = tracks.find(t => t.type === 'video');
      
      if (videoTrack) {
-        // Find clip under playhead
+        // Check if we are inside any clip
         const activeClip = videoTrack.clips.find(clip => 
             currentTime >= clip.start && currentTime < (clip.start + clip.duration)
         );
 
         if (activeClip && activeClip.url) {
-            // A clip is active!
-            if (playerSrc !== activeClip.url) setPlayerSrc(activeClip.url);
-            setPlayerClipStart(activeClip.start);
-            setPlayerClipOffset(activeClip.offset);
+            // ONLY update if it's a DIFFERENT clip to prevent re-renders
+            if (playerSrc !== activeClip.url) {
+                setPlayerSrc(activeClip.url);
+                setPlayerClipStart(activeClip.start);
+                setPlayerClipOffset(activeClip.offset);
+            }
         } else {
-            // No clip at this time
-            if (playerSrc !== null) setPlayerSrc(null);
+            // We are in empty space
+            if (playerSrc !== null) {
+                setPlayerSrc(null);
+            }
         }
      }
   }, [currentTime, tracks, playerSrc]);
+
+  // --- ENGINE 2: GAP PLAYBACK (FIXED) ---
+  useEffect(() => {
+    let animationFrameId: number;
+    let lastTime = performance.now();
+
+    const tick = () => {
+      const now = performance.now();
+      const delta = (now - lastTime) / 1000;
+      lastTime = now;
+      
+      // If we are playing and there is NO video source, we must tick the clock manually.
+      // This handles the "Empty Space" between clips.
+      if (isPlaying && !playerSrc) {
+          setCurrentTime(prev => prev + delta);
+          animationFrameId = requestAnimationFrame(tick);
+      }
+    };
+
+    if (isPlaying && !playerSrc) {
+      lastTime = performance.now();
+      animationFrameId = requestAnimationFrame(tick);
+    }
+
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    };
+  }, [isPlaying, playerSrc]);
 
   // --- TIMELINE ACTIONS ---
 
@@ -59,13 +89,11 @@ export default function EditorPage() {
         name: clipData.name,
         start: time,
         duration: clipData.duration || 10,
-        offset: 0, // Starts at beginning of file
+        offset: 0, 
         url: clipData.url,
         type: clipData.type
     };
     setTracks(prev => prev.map(t => t.id === trackId ? { ...t, clips: [...t.clips, newClip] } : t));
-    
-    // Auto-select
     setSelectedClipId(newClip.id);
     setCurrentTime(time); 
   };
@@ -98,7 +126,6 @@ export default function EditorPage() {
     }));
   };
 
-  // --- SPLIT LOGIC ---
   const handleSplitClip = (trackId: string, clipId: string, splitTime: number) => {
     setTracks(prev => prev.map(track => {
        if (track.id !== trackId) return track;
@@ -108,10 +135,8 @@ export default function EditorPage() {
        const offset = splitTime - originalClip.start;
        if (offset <= 0 || offset >= originalClip.duration) return track;
 
-       // Left Clip
        const leftClip = { ...originalClip, duration: offset };
        
-       // Right Clip (New Offset = Old Offset + Cut Amount)
        const rightClip = { 
            ...originalClip, 
            id: Math.random().toString(36).substr(2, 9) + "_split", 
@@ -132,8 +157,6 @@ export default function EditorPage() {
   };
 
   // --- AI INTEGRATION LOGIC ---
-  
-  // 1. Helper to get the actual Clip Object
   const getSelectedClipObject = () => {
     if (!selectedClipId) return null;
     for (const t of tracks) {
@@ -143,13 +166,10 @@ export default function EditorPage() {
     return null;
   };
 
-  // 2. Callback when AI finishes editing
-  // UPDATED: Now accepts newDuration to resize the clip!
   const handleAiProcessingComplete = (newUrl: string, newDuration: number) => {
     if (!selectedClipId) return;
 
     setTracks(prev => prev.map(track => {
-        // Only update the track containing the selected clip
         if (!track.clips.some(c => c.id === selectedClipId)) return track;
 
         return {
@@ -158,12 +178,9 @@ export default function EditorPage() {
                 if (c.id === selectedClipId) {
                     return {
                         ...c,
-                        url: newUrl,   // Use the new rendered file
-                        offset: 0,     // Reset offset (it's a fresh file now)
+                        url: newUrl,
+                        offset: 0,
                         name: c.name + " (AI)",
-                        
-                        // --- THE KEY FIX ---
-                        // Update the timeline duration to match the new file!
                         duration: newDuration
                     };
                 }
@@ -172,7 +189,6 @@ export default function EditorPage() {
         };
     }));
     
-    // Force player update
     setPlayerSrc(newUrl);
     setPlayerClipOffset(0);
   };
@@ -185,23 +201,21 @@ export default function EditorPage() {
         <TopBar />
         
         <div className="flex-1 flex overflow-hidden">
-          {/* TOOLS PANEL with AI connection */}
           <ToolsPanel 
              activeTool={activeTool} 
-             onMediaSelect={(url) => { /* Optional: Handles media library clicks */ }} 
+             onMediaSelect={(url) => { /* Optional */ }} 
              selectedClip={getSelectedClipObject()}
              onUpdateProcessedClip={handleAiProcessingComplete}
           />
           
           <div className="flex-1 flex flex-col min-w-0 bg-bg-black relative">
             
-            {/* PLAYER */}
             <div className="flex-1 flex min-h-0">
                <Player 
                   src={playerSrc} 
                   currentTime={currentTime} 
                   isPlaying={isPlaying} 
-                  onTimeUpdate={setCurrentTime} 
+                  onTimeUpdate={setCurrentTime} // Player drives time when src exists
                   onDurationChange={()=>{}} 
                   onTogglePlay={() => setIsPlaying(!isPlaying)}
                   clipStartTime={playerClipStart}
@@ -212,7 +226,6 @@ export default function EditorPage() {
                </div>
             </div>
 
-            {/* TIMELINE */}
             <div className="h-87.5 flex flex-col shrink-0 z-10 border-t border-border-gray relative">
                <Timeline 
                   tracks={tracks} 

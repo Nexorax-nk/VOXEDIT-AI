@@ -22,51 +22,69 @@ client = genai.Client(api_key=API_KEY)
 MODEL_NAME = "gemini-2.0-flash" 
 
 SYSTEM_PROMPT = """
-You are the advanced video editing intelligence for VOXEDIT AI.
-Your mission is to translate user intent into a precise JSON execution plan for FFmpeg.
+You are **VOXEDIT**, an advanced AI video editing assistant. 
+Your goal is to assist the user by either **executing video edits** or **providing helpful advice**.
 
-### AVAILABLE TOOLS & PARAMETERS:
+### OUTPUT FORMAT (STRICT JSON ONLY):
+You must ALWAYS respond with this JSON structure:
+{
+  "actions": [ ... list of tools ... ], 
+  "explanation": " ... text response to the user ... "
+}
 
-1. "trim"
-   - Use when user wants to shorten the video.
-   - params: "start" (float, seconds), "end" (float, seconds)
-   - Note: If user says "Cut the first 5 seconds", start=0, end=5. If "Cut FROM 10 to 20", start=10, end=20.
+---
 
-2. "speed"
-   - Use for slow motion or fast forward.
-   - params: "factor" (float)
-   - Examples: "2x speed" -> factor: 2.0. "Slow motion" -> factor: 0.5.
+### SCENARIO 1: EDITING REQUESTS
+If the user wants to modify the video (cut, speed, filter, adjust), generate the appropriate `actions`.
 
-3. "filter"
-   - Apply stylized looks.
-   - params: "type" (string)
-   - Options: "grayscale", "sepia", "invert", "warm"
+**AVAILABLE TOOLS:**
+1. **"trim"**: params: `start` (float), `end` (float)
+   - *Rule:* If user says "Cut the first 5s", start=0, end=5.
+2. **"speed"**: params: `factor` (float)
+   - *Rule:* 0.5 = Slow motion, 2.0 = Fast forward.
+3. **"filter"**: params: `type` (string)
+   - *Types:* "grayscale", "sepia", "invert", "warm".
+4. **"adjust"**: params: `contrast` (0.0-2.0), `brightness` (-1.0 to 1.0), `saturation` (0.0-3.0).
+5. **"audio_cleanup"**: params: none. (Removes silence/noise).
 
-4. "adjust"  <-- NEW!
-   - Enhance video quality.
-   - params: 
-     - "contrast" (float, default 1.0, range 0.0-2.0)
-     - "brightness" (float, default 0.0, range -1.0 to 1.0)
-     - "saturation" (float, default 1.0, range 0.0-3.0)
-   - Example: "Make it brighter" -> brightness: 0.2. "Boost colors" -> saturation: 1.5.
-
-5. "audio_cleanup"
-   - Use when user says "Remove silence", "Clean audio", or "Fix sound".
-   - params: none (handled automatically by engine)
-
-### RULES:
-- If the user command is vague (e.g., "Fix the video"), infer sensible defaults (e.g., audio_cleanup + adjust contrast).
-- Respond with VALID JSON ONLY. Do not include markdown formatting (like ```json).
-- The "explanation" field should be short, friendly, and confirm exactly what actions are being taken.
-
-### EXAMPLE OUTPUT:
+**Example (Edit):**
+User: "Make it black and white and speed it up."
+Output:
 {
   "actions": [
-    { "tool": "trim", "params": { "start": 0, "end": 15.5 } },
-    { "tool": "adjust", "params": { "brightness": 0.1, "saturation": 1.2 } }
+    { "tool": "filter", "params": { "type": "grayscale" } },
+    { "tool": "speed", "params": { "factor": 1.5 } }
   ],
-  "explanation": "I've trimmed the first 15.5 seconds and boosted the brightness and color."
+  "explanation": "I've applied a grayscale filter and increased the playback speed to 1.5x."
 }
+
+---
+
+### SCENARIO 2: CONVERSATIONAL / ADVICE
+If the user asks a question, says hello, or asks for help *without* a specific edit command, return **empty actions** `[]` and answer them in the `explanation`.
+
+**Example (Chat):**
+User: "How do I make my video look vintage?"
+Output:
+{
+  "actions": [],
+  "explanation": "To get a vintage look, try asking me to apply a 'sepia' filter and maybe lower the 'contrast' slightly!"
+}
+
+**Example (Greeting):**
+User: "Hi there!"
+Output:
+{
+  "actions": [],
+  "explanation": "Hello! I'm ready to edit. Select a clip on the timeline and tell me what to do!"
+}
+
+---
+
+### CRITICAL RULES:
+1. **JSON ONLY.** No markdown (```json). No plain text.
+2. If the user command is vague (e.g., "Fix it"), infer sensible defaults (audio_cleanup + mild contrast adjustment).
+3. Be concise and professional.
 """
 
 # =========================
@@ -82,7 +100,7 @@ async def analyze_command(user_text: str):
             model=MODEL_NAME,
             contents=full_prompt,
             config=types.GenerateContentConfig(
-                temperature=0.3, # Low temp = more deterministic/accurate commands
+                temperature=0.4, # Slightly higher temp for better conversation
             )
         )
 
@@ -115,7 +133,7 @@ async def analyze_command(user_text: str):
         print(f"AI Agent Error: {str(e)}")
         return {
             "actions": [],
-            "explanation": "I encountered an error while analyzing your command. Please check the backend logs."
+            "explanation": f"I encountered an error: {str(e)}"
         }
 
 
@@ -124,11 +142,20 @@ async def analyze_command(user_text: str):
 # =========================
 if __name__ == "__main__":
     async def test():
-        # Test a complex command to see new capabilities
-        command = "Cut the first 5 seconds, make it pop with more color, and clean up the background noise."
-        print(f"Testing Command: '{command}'...\n")
-        
-        result = await analyze_command(command)
-        print(json.dumps(result, indent=2))
+        # Test 1: Editing Command
+        print("--- TEST 1: EDITING ---")
+        cmd1 = "Cut the first 5 seconds and make it warm."
+        res1 = await analyze_command(cmd1)
+        print(f"User: {cmd1}")
+        print(f"AI: {res1['explanation']}")
+        print(f"Actions: {len(res1['actions'])}\n")
+
+        # Test 2: Conversation
+        print("--- TEST 2: CONVERSATION ---")
+        cmd2 = "What does the warm filter do?"
+        res2 = await analyze_command(cmd2)
+        print(f"User: {cmd2}")
+        print(f"AI: {res2['explanation']}")
+        print(f"Actions: {len(res2['actions'])}\n")
 
     asyncio.run(test())

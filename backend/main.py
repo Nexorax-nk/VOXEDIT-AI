@@ -33,6 +33,7 @@ async def upload_video(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
     return {"filename": file.filename, "url": f"http://localhost:8000/files/{file.filename}"}
 
+# --- TEXT COMMAND ENDPOINT ---
 @app.post("/edit")
 async def edit_video(
     command: str = Form(...), 
@@ -50,10 +51,20 @@ async def edit_video(
     actions = ai_plan.get("actions", [])
     explanation = ai_plan.get("explanation", "Processed successfully.")
     
+    # --- LOGIC UPDATE: HANDLE CONVERSATION ---
     if not actions:
-        return {"status": "error", "message": "AI didn't understand."}
+        print("   💬 Conversational response (no edits).")
+        return {
+            "status": "success",
+            "original_file": filename,
+            "processed_url": None, # Signal to frontend that no file changed
+            "new_duration": None,
+            "explanation": explanation, # The AI's chat answer
+            "actions": []
+        }
 
-    # 2. Run Engine
+    # 2. Run Engine (Only if there are actions)
+    print("   ⚙️ executing actions...")
     result = await process_video(input_path, actions, clip_start, clip_duration)
     if not result:
         raise HTTPException(status_code=500, detail="Processing failed")
@@ -67,7 +78,7 @@ async def edit_video(
         "actions": actions
     }
 
-# --- 🎤 NEW: VOICE COMMAND ENDPOINT ---
+# --- 🎤 VOICE COMMAND ENDPOINT ---
 @app.post("/voice-command")
 async def voice_command(
     audio: UploadFile = File(...),
@@ -75,12 +86,6 @@ async def voice_command(
     clip_start: float = Form(0.0),
     clip_duration: float = Form(None)
 ):
-    """
-    1. Receives Audio Blob (WebM/WAV)
-    2. Transcribes to Text
-    3. Calls analyze_command (AI)
-    4. Calls process_video (FFmpeg)
-    """
     print("🎤 Receiving Voice Command...")
     
     try:
@@ -89,8 +94,7 @@ async def voice_command(
         with open(temp_audio_path, "wb") as buffer:
             shutil.copyfileobj(audio.file, buffer)
 
-        # 2. Convert to WAV (SpeechRecognition needs WAV)
-        # Browser usually sends WebM. Pydub handles the conversion.
+        # 2. Convert to WAV
         audio_segment = AudioSegment.from_file(temp_audio_path)
         wav_path = temp_audio_path + ".wav"
         audio_segment.export(wav_path, format="wav")
@@ -100,7 +104,6 @@ async def voice_command(
         with sr.AudioFile(wav_path) as source:
             audio_data = recognizer.record(source)
             try:
-                # Use Google Web Speech API (Free default)
                 text_command = recognizer.recognize_google(audio_data)
                 print(f"🗣️ Transcribed: '{text_command}'")
             except sr.UnknownValueError:
@@ -108,23 +111,29 @@ async def voice_command(
             except sr.RequestError:
                 return {"status": "error", "message": "Speech service unavailable"}
 
-        # Clean up temp files
+        # Clean up
         if os.path.exists(temp_audio_path): os.remove(temp_audio_path)
         if os.path.exists(wav_path): os.remove(wav_path)
 
-        # 4. NOW RUN THE EDIT (Re-use existing logic!)
-        # We manually call the logic from /edit here
-        input_path = os.path.join(UPLOAD_DIR, filename)
-        
-        # A. Ask AI
+        # 4. Ask AI
         ai_plan = await analyze_command(text_command)
         actions = ai_plan.get("actions", [])
         explanation = ai_plan.get("explanation", "Processed successfully.")
 
+        # --- LOGIC UPDATE: HANDLE CONVERSATION ---
         if not actions:
-            return {"status": "error", "message": "AI understood the words, but not the command."}
+             print("   💬 Conversational response (no edits).")
+             return {
+                "status": "success",
+                "transcription": text_command,
+                "processed_url": None, # No video update
+                "new_duration": None,
+                "explanation": explanation,
+                "actions": []
+            }
 
-        # B. Run Engine
+        # 5. Run Engine
+        input_path = os.path.join(UPLOAD_DIR, filename)
         result = await process_video(input_path, actions, clip_start, clip_duration)
         if not result:
             raise HTTPException(status_code=500, detail="Video processing failed")
@@ -133,7 +142,7 @@ async def voice_command(
         
         return {
             "status": "success",
-            "transcription": text_command, # Send back what it heard
+            "transcription": text_command,
             "processed_url": f"http://localhost:8000/files/{new_filename}",
             "new_duration": result["duration"],
             "explanation": explanation

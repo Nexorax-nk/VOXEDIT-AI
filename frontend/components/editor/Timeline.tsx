@@ -11,7 +11,7 @@ export type Clip = {
   name: string;
   start: number;    // Timeline Position (s)
   duration: number; // Length (s)
-  offset: number;   // NEW: Where the source file starts playing (s)
+  offset: number;   // Where the source file starts playing (s)
   url?: string;
   type: string;
 };
@@ -53,6 +53,7 @@ export default function Timeline({
   const [zoom, setZoom] = useState(20); 
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [isFocused, setIsFocused] = useState(false); // NEW: Track Focus State
 
   const [dragState, setDragState] = useState<{
     mode: InteractionMode;
@@ -61,7 +62,7 @@ export default function Timeline({
     startX: number;
     originalStart: number;
     originalDuration: number;
-    originalOffset: number; // Track offset during drag
+    originalOffset: number; 
   }>({ mode: "NONE", clipId: null, trackId: null, startX: 0, originalStart: 0, originalDuration: 0, originalOffset: 0 });
 
   const pixelsToSeconds = (px: number) => px / zoom;
@@ -89,9 +90,22 @@ export default function Timeline({
     return () => container.removeEventListener("wheel", handleWheel);
   }, []);
 
-  // --- SHORTCUTS ---
+  // --- SHORTCUTS (FIXED) ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. IGNORE IF TYPING IN INPUT FIELDS
+      if (
+          e.target instanceof HTMLInputElement || 
+          e.target instanceof HTMLTextAreaElement ||
+          (e.target as HTMLElement).isContentEditable
+      ) {
+          return;
+      }
+
+      // 2. IGNORE IF TIMELINE IS NOT FOCUSED (Optional - usually ignoring input is enough)
+      // Remove the !isFocused check if you want shortcuts to work globally except when typing.
+      // if (!isFocused) return; 
+
       if ((e.key === "Backspace" || e.key === "Delete") && selectedClipId) {
         tracks.forEach(t => t.clips.find(c => c.id === selectedClipId) && onDeleteClip(t.id, selectedClipId));
       }
@@ -99,7 +113,7 @@ export default function Timeline({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedClipId, tracks, onDeleteClip, currentTime]);
+  }, [selectedClipId, tracks, onDeleteClip, currentTime, isFocused]);
 
   // --- DRAG & DROP ---
   const handleExternalDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
@@ -113,7 +127,6 @@ export default function Timeline({
         const dropTime = Math.max(0, clickX / zoom);
         onDropNewClip(trackId, JSON.parse(data), dropTime);
         
-        // Auto-Zoom on first clip
         if (tracks.reduce((acc, t) => acc + t.clips.length, 0) === 0) {
              setZoom(rect.width / ((JSON.parse(data).duration || 10) * 1.5));
         }
@@ -124,6 +137,7 @@ export default function Timeline({
   const handleMouseDown = (e: React.MouseEvent, clip: Clip, trackId: string, mode: InteractionMode) => {
     e.stopPropagation(); e.preventDefault();
     onSelectClip(clip.id);
+    setIsFocused(true); // Focus timeline
     setDragState({
       mode, clipId: clip.id, trackId, startX: e.clientX,
       originalStart: clip.start, originalDuration: clip.duration, originalOffset: clip.offset
@@ -141,19 +155,16 @@ export default function Timeline({
         const newStart = Math.max(0, dragState.originalStart + deltaSeconds);
         onUpdateClip(dragState.trackId, dragState.clipId, { start: newStart });
       }
-      // TRIM LEFT: Start moves right, Duration shrinks, Offset increases
       else if (dragState.mode === "TRIM_LEFT") {
         const maxStart = dragState.originalStart + dragState.originalDuration - 0.2;
         const newStart = Math.min(Math.max(0, dragState.originalStart + deltaSeconds), maxStart);
         const change = newStart - dragState.originalStart;
-        
         onUpdateClip(dragState.trackId, dragState.clipId, { 
             start: newStart, 
             duration: dragState.originalDuration - change,
-            offset: dragState.originalOffset + change // CRITICAL: Update offset when trimming left
+            offset: dragState.originalOffset + change 
         });
       }
-      // TRIM RIGHT: Duration changes
       else if (dragState.mode === "TRIM_RIGHT") {
         const newDuration = Math.max(0.2, dragState.originalDuration + deltaSeconds);
         onUpdateClip(dragState.trackId, dragState.clipId, { duration: newDuration });
@@ -194,7 +205,14 @@ export default function Timeline({
   };
 
   return (
-    <div className="flex flex-col h-full bg-bg-dark border-t border-border-gray select-none relative" ref={containerRef}>
+    <div 
+        className="flex flex-col h-full bg-bg-dark border-t border-border-gray select-none relative outline-none" 
+        ref={containerRef}
+        tabIndex={0} // Makes div focusable
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        onClick={() => setIsFocused(true)} // Click anywhere sets focus
+    >
       {/* TOOLBAR */}
       <div className="h-10 border-b border-border-gray flex items-center justify-between px-4 bg-bg-dark shrink-0 z-30 shadow-sm">
          <div className="text-[10px] text-text-secondary flex gap-4 items-center">
@@ -251,8 +269,7 @@ export default function Timeline({
                             const isDragging = dragState.clipId === clip.id;
                             const baseStyle = track.type === 'video' ? "bg-gradient-to-r from-blue-900/80 to-blue-800/80 border-blue-500/50" : track.type === 'audio' ? "bg-gradient-to-r from-emerald-900/80 to-emerald-800/80 border-emerald-500/50" : "bg-gradient-to-r from-amber-900/80 to-amber-800/80 border-amber-500/50";
                             
-                            // --- SAFETY CALCULATIONS ---
-                            // Ensure these never resolve to NaN or undefined which crashes React
+                            // SAFETY: Handle NaN
                             const safeLeft = (clip.start || 0) * zoom;
                             const safeWidth = Math.max(0, (clip.duration || 0)) * zoom;
 

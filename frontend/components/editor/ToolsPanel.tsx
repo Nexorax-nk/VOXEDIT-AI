@@ -198,8 +198,8 @@ const CopilotPanel = ({
 }) => {
   const [input, setInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [mode, setMode] = useState<"chat" | "voice">("chat"); // NEW: Mode Switcher
-  const [isRecording, setIsRecording] = useState(false);      // NEW: Voice State
+  const [mode, setMode] = useState<"chat" | "voice">("chat"); 
+  const [isRecording, setIsRecording] = useState(false);      
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -263,7 +263,7 @@ const CopilotPanel = ({
                 if (data.status === "error") {
                     setMessages(prev => [...prev, { role: "ai", text: "Error: " + data.message }]);
                 } else {
-                    // Success! Remove the "Processing..." placeholder and show real transcription
+                    // Success! Remove placeholder
                     setMessages(prev => {
                         const newHistory = [...prev];
                         newHistory.pop(); // Remove placeholder
@@ -274,7 +274,8 @@ const CopilotPanel = ({
                         ];
                     });
 
-                    if (onProcessComplete) {
+                    // --- CRITICAL FIX: Only update timeline if URL exists ---
+                    if (data.processed_url && onProcessComplete) {
                         onProcessComplete(data.processed_url, data.new_duration);
                     }
                 }
@@ -298,7 +299,6 @@ const CopilotPanel = ({
     if (mediaRecorderRef.current && isRecording) {
         mediaRecorderRef.current.stop();
         setIsRecording(false);
-        // Stop all tracks to release mic
         mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
     }
   };
@@ -349,7 +349,9 @@ const CopilotPanel = ({
             setMessages(prev => [...prev, { role: "ai", text: "Error: " + data.message }]);
         } else {
             setMessages(prev => [...prev, { role: "ai", text: data.explanation }]);
-            if (onProcessComplete) {
+            
+            // --- CRITICAL FIX: Only update timeline if URL exists ---
+            if (data.processed_url && onProcessComplete) {
                 onProcessComplete(data.processed_url, data.new_duration);
             }
         }
@@ -535,4 +537,3 @@ export default function ToolsPanel({
     </div>
   );
 }
-
