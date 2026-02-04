@@ -8,11 +8,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import io
 import json 
+import ffmpeg # Needed for probing duration
 
 # --- IMPORT CUSTOM SERVICES ---
 from services.ai_agent import analyze_command
 from services.video_engine import process_video, stitch_videos
-from services.voice_gen import generate_voice_reply  # <--- NEW: ElevenLabs Integration
+from services.voice_gen import generate_voice_reply 
+from services.sfx_gen import generate_sound_effect # <--- NEW: SFX Service
 
 app = FastAPI()
 
@@ -81,7 +83,7 @@ async def edit_video(
         "actions": actions
     }
 
-# --- 3. VOICE COMMAND ENDPOINT (WITH ELEVENLABS) ---
+# --- 3. VOICE COMMAND ENDPOINT ---
 @app.post("/voice-command")
 async def voice_command(
     audio: UploadFile = File(...),
@@ -123,7 +125,7 @@ async def voice_command(
         actions = ai_plan.get("actions", [])
         explanation = ai_plan.get("explanation", "Processed successfully.")
 
-        # --- D. GENERATE VOICE REPLY (ELEVENLABS) ---
+        # --- D. GENERATE VOICE REPLY ---
         print(f"   🎙️ Generating AI Voice Reply for: '{explanation}'")
         voice_reply_path = generate_voice_reply(explanation)
         voice_reply_url = None
@@ -132,12 +134,12 @@ async def voice_command(
             voice_filename = os.path.basename(voice_reply_path)
             voice_reply_url = f"http://localhost:8000/files/{voice_filename}"
 
-        # E. Prepare Response Data
+        # E. Prepare Response
         response_data = {
             "status": "success",
             "transcription": text_command,
             "explanation": explanation,
-            "reply_audio_url": voice_reply_url, # Frontend plays this!
+            "reply_audio_url": voice_reply_url,
             "processed_url": None,
             "new_duration": None,
             "actions": actions
@@ -152,7 +154,6 @@ async def voice_command(
                 response_data["processed_url"] = f"http://localhost:8000/files/{new_filename}"
                 response_data["new_duration"] = result["duration"]
             else:
-                # If video processing fails, we still return the voice reply/chat
                 print("   ❌ Video processing failed, but returning chat response.")
 
         return response_data
@@ -173,7 +174,6 @@ async def render_project(
         if not clips:
              return {"status": "error", "message": "No clips to render"}
 
-        # Run Stitching Engine
         output_path = await stitch_videos(clips)
         
         if not output_path:
@@ -188,6 +188,35 @@ async def render_project(
     except Exception as e:
         print(f"Render API Error: {e}")
         return {"status": "error", "message": str(e)}
+
+# --- 5. NEW: MAGIC ASSETS (SFX) ENDPOINT ---
+@app.post("/generate-sfx")
+async def generate_sfx_endpoint(
+    text: str = Form(...),
+    duration: int = Form(None)
+):
+    print(f"✨ Generating SFX for: '{text}'")
+    
+    output_path = generate_sound_effect(text, duration)
+    
+    if not output_path:
+        raise HTTPException(status_code=500, detail="SFX Generation Failed")
+
+    filename = os.path.basename(output_path)
+
+    # Get duration for timeline
+    try:
+        probe = ffmpeg.probe(output_path)
+        dur = float(probe['format']['duration'])
+    except:
+        dur = 3.0 # Fallback
+
+    return {
+        "status": "success",
+        "url": f"http://localhost:8000/files/{filename}",
+        "duration": dur,
+        "name": text
+    }
 
 if __name__ == "__main__":
     import uvicorn

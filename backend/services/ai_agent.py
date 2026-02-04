@@ -19,7 +19,7 @@ if not API_KEY:
 client = genai.Client(api_key=API_KEY)
 
 # Using the fastest stable model
-MODEL_NAME = "gemini-2.0-flash" 
+MODEL_NAME = "gemini-3-pro-preview" 
 
 SYSTEM_PROMPT = """
 You are **VOXEDIT**, an advanced AI video editing assistant. 

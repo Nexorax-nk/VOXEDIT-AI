@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
-import { ZoomIn, ZoomOut, Maximize, Scissors, Trash2 } from "lucide-react";
+import { 
+  ZoomIn, ZoomOut, Maximize, Scissors, Trash2, 
+  Video, Mic, Type, MoreHorizontal, Layers
+} from "lucide-react"; 
 import { cn } from "@/lib/utils";
 
 // --- TYPES ---
@@ -9,9 +12,9 @@ export type TrackType = "video" | "audio" | "text";
 export type Clip = {
   id: string;
   name: string;
-  start: number;    // Timeline Position (s)
-  duration: number; // Length (s)
-  offset: number;   // Where the source file starts playing (s)
+  start: number;     
+  duration: number; 
+  offset: number;   
   url?: string;
   type: string;
 };
@@ -50,32 +53,49 @@ export default function Timeline({
   onSelectClip
 }: TimelineProps) {
   
-  const [zoom, setZoom] = useState(20); 
+  const [zoom, setZoom] = useState(30); 
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [isFocused, setIsFocused] = useState(false); // NEW: Track Focus State
+  const [isFocused, setIsFocused] = useState(false);
 
-  const [dragState, setDragState] = useState<{
-    mode: InteractionMode;
+  // --- REFS FOR SMOOTH DRAG LOGIC ---
+  const stateRef = useRef({
+      tracks,
+      zoom,
+      dragMode: "NONE" as InteractionMode,
+      dragClipId: null as string | null,
+      dragTrackId: null as string | null,
+      startX: 0,
+      originalStart: 0,
+      originalDuration: 0,
+      originalOffset: 0,
+      currentNewStart: 0,
+      currentNewDuration: 0
+  });
+
+  useEffect(() => { stateRef.current.tracks = tracks; }, [tracks]);
+  useEffect(() => { stateRef.current.zoom = zoom; }, [zoom]);
+
+  // --- LOCAL VISUAL STATE (For React Rendering) ---
+  const [visualDrag, setVisualDrag] = useState<{
+    isDragging: boolean;
     clipId: string | null;
-    trackId: string | null;
-    startX: number;
-    originalStart: number;
-    originalDuration: number;
-    originalOffset: number; 
-  }>({ mode: "NONE", clipId: null, trackId: null, startX: 0, originalStart: 0, originalDuration: 0, originalOffset: 0 });
+    start: number;
+    duration: number;
+  }>({ isDragging: false, clipId: null, start: 0, duration: 0 });
 
-  const pixelsToSeconds = (px: number) => px / zoom;
+  const pixelsToSeconds = (px: number) => px / stateRef.current.zoom;
 
-  // --- RULER & ZOOM ---
+  // --- RULER CALCULATION ---
   const rulerTicks = useMemo(() => {
     let step = 1; 
     if (zoom < 10) step = 30; else if (zoom < 30) step = 10; else if (zoom < 80) step = 5; else step = 1;
     const ticks = [];
-    for (let i = 0; i <= 1200; i += step) ticks.push(i);
+    for (let i = 0; i <= 3600; i += step) ticks.push(i); 
     return { ticks, step };
   }, [zoom]);
 
+  // --- ZOOM WHEEL ---
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -90,22 +110,10 @@ export default function Timeline({
     return () => container.removeEventListener("wheel", handleWheel);
   }, []);
 
-  // --- SHORTCUTS (FIXED) ---
+  // --- KEYBOARD SHORTCUTS ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 1. IGNORE IF TYPING IN INPUT FIELDS
-      if (
-          e.target instanceof HTMLInputElement || 
-          e.target instanceof HTMLTextAreaElement ||
-          (e.target as HTMLElement).isContentEditable
-      ) {
-          return;
-      }
-
-      // 2. IGNORE IF TIMELINE IS NOT FOCUSED (Optional - usually ignoring input is enough)
-      // Remove the !isFocused check if you want shortcuts to work globally except when typing.
-      // if (!isFocused) return; 
-
+      if ((e.target as HTMLElement).tagName === "INPUT") return;
       if ((e.key === "Backspace" || e.key === "Delete") && selectedClipId) {
         tracks.forEach(t => t.clips.find(c => c.id === selectedClipId) && onDeleteClip(t.id, selectedClipId));
       }
@@ -113,80 +121,124 @@ export default function Timeline({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedClipId, tracks, onDeleteClip, currentTime, isFocused]);
+  }, [selectedClipId, tracks, onDeleteClip, currentTime]);
 
-  // --- DRAG & DROP ---
-  const handleExternalDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
-  const handleExternalDrop = (e: React.DragEvent, trackId: string) => {
-    e.preventDefault();
-    if (dragState.mode !== "NONE") return;
-    const data = e.dataTransfer.getData("application/json");
-    if (data && scrollContainerRef.current) {
-        const rect = scrollContainerRef.current.getBoundingClientRect();
-        const clickX = e.clientX - rect.left + scrollContainerRef.current.scrollLeft;
-        const dropTime = Math.max(0, clickX / zoom);
-        onDropNewClip(trackId, JSON.parse(data), dropTime);
-        
-        if (tracks.reduce((acc, t) => acc + t.clips.length, 0) === 0) {
-             setZoom(rect.width / ((JSON.parse(data).duration || 10) * 1.5));
-        }
-    }
-  };
-
-  // --- MOUSE HANDLERS (Move/Trim) ---
+  // --- DRAG HANDLERS ---
   const handleMouseDown = (e: React.MouseEvent, clip: Clip, trackId: string, mode: InteractionMode) => {
     e.stopPropagation(); e.preventDefault();
     onSelectClip(clip.id);
-    setIsFocused(true); // Focus timeline
-    setDragState({
-      mode, clipId: clip.id, trackId, startX: e.clientX,
-      originalStart: clip.start, originalDuration: clip.duration, originalOffset: clip.offset
-    });
+    setIsFocused(true);
+
+    stateRef.current.dragMode = mode;
+    stateRef.current.dragClipId = clip.id;
+    stateRef.current.dragTrackId = trackId;
+    stateRef.current.startX = e.clientX;
+    stateRef.current.originalStart = clip.start;
+    stateRef.current.originalDuration = clip.duration;
+    stateRef.current.originalOffset = clip.offset;
+    stateRef.current.currentNewStart = clip.start;
+    stateRef.current.currentNewDuration = clip.duration;
+
+    setVisualDrag({ isDragging: true, clipId: clip.id, start: clip.start, duration: clip.duration });
+
+    window.addEventListener("mousemove", handleGlobalMouseMove);
+    window.addEventListener("mouseup", handleGlobalMouseUp);
   };
 
-  useEffect(() => {
-    if (dragState.mode === "NONE") return;
+  const handleGlobalMouseMove = (e: MouseEvent) => {
+      const state = stateRef.current;
+      if (state.dragMode === "NONE" || !state.dragClipId) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!dragState.clipId || !dragState.trackId) return;
-      const deltaSeconds = pixelsToSeconds(e.clientX - dragState.startX);
+      const deltaSeconds = pixelsToSeconds(e.clientX - state.startX);
+      let newStart = state.originalStart;
+      let newDuration = state.originalDuration;
 
-      if (dragState.mode === "MOVE") {
-        const newStart = Math.max(0, dragState.originalStart + deltaSeconds);
-        onUpdateClip(dragState.trackId, dragState.clipId, { start: newStart });
+      if (state.dragMode === "MOVE") {
+          newStart = Math.max(0, state.originalStart + deltaSeconds);
+      } 
+      else if (state.dragMode === "TRIM_LEFT") {
+          const maxStart = state.originalStart + state.originalDuration - 0.2; 
+          newStart = Math.min(Math.max(0, state.originalStart + deltaSeconds), maxStart);
+          const change = newStart - state.originalStart;
+          newDuration = state.originalDuration - change;
+      } 
+      else if (state.dragMode === "TRIM_RIGHT") {
+          newDuration = Math.max(0.2, state.originalDuration + deltaSeconds);
       }
-      else if (dragState.mode === "TRIM_LEFT") {
-        const maxStart = dragState.originalStart + dragState.originalDuration - 0.2;
-        const newStart = Math.min(Math.max(0, dragState.originalStart + deltaSeconds), maxStart);
-        const change = newStart - dragState.originalStart;
-        onUpdateClip(dragState.trackId, dragState.clipId, { 
-            start: newStart, 
-            duration: dragState.originalDuration - change,
-            offset: dragState.originalOffset + change 
-        });
-      }
-      else if (dragState.mode === "TRIM_RIGHT") {
-        const newDuration = Math.max(0.2, dragState.originalDuration + deltaSeconds);
-        onUpdateClip(dragState.trackId, dragState.clipId, { duration: newDuration });
-      }
-    };
 
-    const handleMouseUp = (e: MouseEvent) => {
-       if (dragState.mode === "MOVE") {
-          const el = document.elementFromPoint(e.clientX, e.clientY);
-          const targetTrackId = el?.closest('[data-track-id]')?.getAttribute('data-track-id');
-          if (targetTrackId && targetTrackId !== dragState.trackId) {
-             const delta = pixelsToSeconds(e.clientX - dragState.startX);
-             onSwitchTrack(dragState.clipId!, dragState.trackId!, targetTrackId, Math.max(0, dragState.originalStart + delta));
-          }
-       }
-       setDragState(prev => ({ ...prev, mode: "NONE", clipId: null }));
-    };
+      state.currentNewStart = newStart;
+      state.currentNewDuration = newDuration;
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
-  }, [dragState, tracks, zoom]); 
+      setVisualDrag(prev => ({ ...prev, start: newStart, duration: newDuration }));
+  };
+
+  const handleGlobalMouseUp = (e: MouseEvent) => {
+      window.removeEventListener("mousemove", handleGlobalMouseMove);
+      window.removeEventListener("mouseup", handleGlobalMouseUp);
+
+      const state = stateRef.current;
+      if (state.dragMode === "NONE" || !state.dragClipId || !state.dragTrackId) return;
+
+      if (state.dragMode === "MOVE") {
+           const el = document.elementFromPoint(e.clientX, e.clientY);
+           const targetTrackId = el?.closest('[data-track-id]')?.getAttribute('data-track-id');
+
+           if (targetTrackId && targetTrackId !== state.dragTrackId) {
+               onSwitchTrack(state.dragClipId, state.dragTrackId, targetTrackId, state.currentNewStart);
+           } else {
+               onUpdateClip(state.dragTrackId, state.dragClipId, { start: state.currentNewStart });
+           }
+      } 
+      else if (state.dragMode === "TRIM_LEFT") {
+           const change = state.currentNewStart - state.originalStart;
+           onUpdateClip(state.dragTrackId, state.dragClipId, { 
+               start: state.currentNewStart,
+               duration: state.currentNewDuration,
+               offset: state.originalOffset + change
+           });
+      }
+      else if (state.dragMode === "TRIM_RIGHT") {
+           onUpdateClip(state.dragTrackId, state.dragClipId, { duration: state.currentNewDuration });
+      }
+
+      stateRef.current.dragMode = "NONE";
+      stateRef.current.dragClipId = null;
+      setVisualDrag({ isDragging: false, clipId: null, start: 0, duration: 0 });
+  };
+
+  // --- EXTERNAL DROP (UPDATED WITH 1/3 SCALING LOGIC) ---
+  const handleExternalDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
+  
+  const handleExternalDrop = (e: React.DragEvent, trackId: string) => {
+    e.preventDefault();
+    const data = e.dataTransfer.getData("application/json");
+    
+    if (data && scrollContainerRef.current) {
+        const parsedClip = JSON.parse(data);
+        const rect = scrollContainerRef.current.getBoundingClientRect();
+        const clickX = e.clientX - rect.left + scrollContainerRef.current.scrollLeft;
+        
+        // Calculate drop time based on CURRENT zoom
+        const dropTime = Math.max(0, clickX / zoom);
+        onDropNewClip(trackId, parsedClip, dropTime);
+
+        // --- THE "1/3rd" AUTO-ZOOM FEATURE ---
+        // If the timeline is empty (first clip), adjust zoom so the clip takes up 1/3 of the viewport.
+        const totalClips = tracks.reduce((acc, t) => acc + t.clips.length, 0);
+        
+        if (totalClips === 0) {
+            const containerWidth = rect.width;
+            const clipDuration = parsedClip.duration || 10;
+            
+            // Formula: (ContainerWidth / 3) = ClipDuration * NewZoom
+            // Therefore: NewZoom = (ContainerWidth / 3) / ClipDuration
+            const targetZoom = (containerWidth / 3) / clipDuration;
+            
+            // Apply zoom with safety clamps
+            setZoom(Math.min(Math.max(targetZoom, 2), 300));
+        }
+    }
+  };
 
   // --- HELPERS ---
   const handleSplit = () => {
@@ -198,110 +250,237 @@ export default function Timeline({
          onSelectClip(null);
     }
   };
+  
+  // Adjusted "Fit to Screen" to also follow the 1/3rd style logic roughly (fit with padding)
   const fitToScreen = () => {
     let maxEnd = 10;
     tracks.forEach(t => t.clips.forEach(c => maxEnd = Math.max(maxEnd, c.start + c.duration)));
-    if (scrollContainerRef.current) setZoom(scrollContainerRef.current.clientWidth / (maxEnd * 1.1));
+    if (scrollContainerRef.current) setZoom(scrollContainerRef.current.clientWidth / (maxEnd * 1.2));
+  };
+
+  const getTrackIcon = (type: string) => {
+      const common = "w-3.5 h-3.5";
+      switch(type) {
+          case 'video': return <Video className={common} />;
+          case 'audio': return <Mic className={common} />;
+          case 'text': return <Type className={common} />;
+          default: return <Layers className={common} />;
+      }
   };
 
   return (
+    <>
+    <style jsx global>{`
+        .timeline-scroll::-webkit-scrollbar { height: 10px; width: 10px; background: #0A0A0A; }
+        .timeline-scroll::-webkit-scrollbar-track { background: #0A0A0A; border-top: 1px solid rgba(255,255,255,0.05); }
+        .timeline-scroll::-webkit-scrollbar-thumb { background: #222; border-radius: 5px; border: 2px solid #0A0A0A; }
+        .timeline-scroll::-webkit-scrollbar-thumb:hover { background: #333; }
+        .timeline-scroll::-webkit-scrollbar-corner { background: #0A0A0A; }
+    `}</style>
+
     <div 
-        className="flex flex-col h-full bg-bg-dark border-t border-border-gray select-none relative outline-none" 
+        className="flex flex-col h-full w-full bg-[#0A0A0A] text-gray-300 font-sans select-none relative overflow-hidden outline-none" 
         ref={containerRef}
-        tabIndex={0} // Makes div focusable
+        tabIndex={0} 
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
-        onClick={() => setIsFocused(true)} // Click anywhere sets focus
+        onClick={() => setIsFocused(true)} 
     >
-      {/* TOOLBAR */}
-      <div className="h-10 border-b border-border-gray flex items-center justify-between px-4 bg-bg-dark shrink-0 z-30 shadow-sm">
-         <div className="text-[10px] text-text-secondary flex gap-4 items-center">
-             <button onClick={handleSplit} disabled={!selectedClipId} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded border transition-all", selectedClipId ? "bg-electric-red text-white border-electric-red shadow-[0_0_10px_rgba(255,46,77,0.3)]" : "bg-zinc-800 text-gray-500 border-white/5 opacity-50")}>
-                <Scissors className="w-3.5 h-3.5" /><span className="font-bold tracking-wide">RAZOR</span>
-             </button>
-             <button onClick={() => selectedClipId && tracks.forEach(t => t.clips.find(c => c.id === selectedClipId) && onDeleteClip(t.id, selectedClipId))} disabled={!selectedClipId} className="p-1.5 hover:bg-bg-lighter rounded text-gray-400 hover:text-red-500 disabled:opacity-30"><Trash2 className="w-4 h-4" /></button>
+      
+      {/* --- TOOLBAR --- */}
+      <div className="h-12 border-b border-white/6 flex items-center justify-between px-4 bg-[#0A0A0A] shrink-0 z-40 relative">
+         <div className="flex gap-3 items-center">
+             <div className="flex bg-[#111] p-0.5 rounded-lg border border-white/6">
+                <button 
+                  onClick={handleSplit} 
+                  disabled={!selectedClipId} 
+                  className={cn(
+                      "flex items-center gap-2 px-3 py-1.5 rounded-sm text-[10px] font-bold tracking-wider uppercase transition-all",
+                      selectedClipId 
+                          ? "text-electric-red hover:bg-electric-red/10 hover:shadow-[0_0_15px_rgba(255,46,77,0.2)]" 
+                          : "text-neutral-600 cursor-not-allowed"
+                  )}
+                >
+                  <Scissors className="w-3.5 h-3.5" /> 
+                  <span>Split</span>
+                </button>
+                <div className="w-px bg-white/6 my-1 mx-1" />
+                <button 
+                  onClick={() => selectedClipId && tracks.forEach(t => t.clips.find(c => c.id === selectedClipId) && onDeleteClip(t.id, selectedClipId))} 
+                  disabled={!selectedClipId} 
+                  className={cn(
+                    "p-1.5 rounded-sm transition-colors",
+                    selectedClipId ? "text-neutral-500 hover:text-electric-red hover:bg-electric-red/10" : "text-neutral-700 cursor-not-allowed"
+                  )}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+             </div>
          </div>
-         <div className="flex items-center gap-3">
-             <button onClick={fitToScreen} className="p-1 hover:bg-bg-lighter rounded text-text-secondary"><Maximize className="w-3 h-3" /></button>
-             <div className="h-4 w-px bg-border-gray" />
-             <button onClick={() => setZoom(z => Math.max(z - 10, 2))}><ZoomOut className="w-4 h-4 text-gray-400" /></button>
-             <div className="w-20 h-1 bg-zinc-800 rounded-full overflow-hidden"><div className="h-full bg-electric-red" style={{ width: `${Math.min(zoom/2, 100)}%` }} /></div>
-             <button onClick={() => setZoom(z => Math.min(z + 10, 300))}><ZoomIn className="w-4 h-4 text-gray-400" /></button>
+         
+         <div className="absolute left-1/2 -translate-x-1/2 font-mono text-xs font-semibold text-electric-red tracking-widest bg-electric-red/5 px-4 py-1.5 rounded-full border border-electric-red/20 shadow-[0_0_20px_rgba(255,46,77,0.1)]">
+            {new Date(currentTime * 1000).toISOString().substr(11, 8)}
+            <span className="text-neutral-500 text-[10px] ml-1">{(currentTime % 1).toFixed(2).substring(1)}</span>
+         </div>
+
+         <div className="flex items-center gap-4">
+             <div className="flex items-center gap-2 bg-[#111] px-2 py-1 rounded-lg border border-white/6">
+                <button onClick={() => setZoom(z => Math.max(z - 10, 2))} className="p-1 hover:text-white transition-colors text-neutral-500"><ZoomOut className="w-3.5 h-3.5" /></button>
+                <div className="w-20 h-1 bg-neutral-800 rounded-full overflow-hidden relative">
+                    <div className="absolute left-0 top-0 bottom-0 bg-electric-red shadow-[0_0_10px_#FF2E4D]" style={{ width: `${Math.min(zoom/3, 100)}%` }} />
+                </div>
+                <button onClick={() => setZoom(z => Math.min(z + 10, 300))} className="p-1 hover:text-white transition-colors text-neutral-500"><ZoomIn className="w-3.5 h-3.5" /></button>
+             </div>
+             <button onClick={fitToScreen} className="p-2 hover:bg-white/5 rounded-md text-neutral-500 hover:text-white transition-colors"><Maximize className="w-4 h-4" /></button>
          </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden relative">
-        {/* HEADERS */}
-        <div className="w-48 bg-zinc-900 border-r border-border-gray flex flex-col shrink-0 z-20 shadow-md">
-             <div className="h-9 border-b border-border-gray bg-zinc-950 flex items-center px-4 text-[10px] font-bold text-gray-500 tracking-wider">TRACKS</div>
-             {tracks.map(track => (
-                 <div key={track.id} className="h-24 border-b border-border-gray/30 flex flex-col justify-center px-4 bg-zinc-900/50 hover:bg-zinc-800/80 transition-colors">
-                    <div className="flex items-center justify-between mb-1">
-                        <span className={cn("text-xs font-bold uppercase", track.type==='video'?"text-blue-400":track.type==='audio'?"text-emerald-400":"text-amber-400")}>{track.name}</span>
-                        <div className="w-2 h-2 rounded-full bg-white/10" />
-                    </div>
-                 </div>
-             ))}
+        {/* --- LEFT HEADER --- */}
+        <div className="w-56 bg-[#0E0E0E] border-r border-white/6 flex flex-col shrink-0 z-30">
+             <div className="h-9 border-b border-white/6 bg-[#0E0E0E] flex items-center px-4">
+                 <span className="text-[10px] font-bold text-neutral-500 tracking-[0.2em] uppercase flex items-center gap-2">
+                    <Layers className="w-3 h-3 text-electric-red" /> Layers
+                 </span>
+             </div>
+             
+             <div className="flex-1 overflow-hidden relative">
+               {tracks.map(track => (
+                  <div key={track.id} className="h-20 border-b border-white/6 flex flex-col justify-center px-4 hover:bg-white/2 transition-colors group relative">
+                      <div className="absolute left-0 top-0 bottom-0 w-0.75 bg-electric-red opacity-0 group-hover:opacity-100 transition-opacity shadow-[0_0_12px_#FF2E4D]" />
+                      <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-3">
+                              <div className={cn(
+                                "p-1.5 rounded bg-neutral-900 border border-white/5 transition-colors",
+                                track.type === 'video' ? "text-blue-400" : track.type === 'audio' ? "text-emerald-400" : "text-white"
+                              )}>
+                                   {getTrackIcon(track.type)}
+                              </div>
+                              <span className="text-xs font-bold text-neutral-400 group-hover:text-white transition-colors truncate max-w-25">
+                                  {track.name}
+                              </span>
+                          </div>
+                          <MoreHorizontal className="w-4 h-4 text-neutral-600 hover:text-white cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <div className="flex gap-2 pl-9">
+                         <span className="text-[9px] text-neutral-600 bg-neutral-900/50 px-1.5 py-0.5 rounded border border-white/5 font-mono tracking-wide">{track.type.toUpperCase()}</span>
+                      </div>
+                  </div>
+               ))}
+             </div>
         </div>
 
-        {/* SCROLLABLE AREA */}
-        <div className="flex-1 overflow-x-auto overflow-y-hidden relative custom-scrollbar bg-zinc-950 min-w-0" ref={scrollContainerRef}
-             onClick={(e) => {
-                if((e.target as HTMLElement).classList.contains('bg-zinc-950') || (e.target as HTMLElement).classList.contains('track-lane')) {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    onSeek((e.clientX - rect.left + e.currentTarget.scrollLeft) / zoom);
-                    onSelectClip(null);
-                }
-             }}>
-             <div className="h-9 border-b border-border-gray bg-zinc-900/95 backdrop-blur sticky top-0 z-10 w-1500">
-                {rulerTicks.ticks.map((time) => (
-                    <div key={time} className="absolute bottom-0 top-2 border-l border-gray-700/50 pl-1.5 flex flex-col justify-end pb-1" style={{ left: time * zoom }}>
-                        <span className="text-[9px] font-medium text-gray-500 select-none">{time}s</span>
-                    </div>
-                ))}
-             </div>
-             <div className="w-1500 relative">
-                <div className="absolute inset-0 pointer-events-none">{rulerTicks.ticks.map(time => <div key={time} className="absolute top-0 bottom-0 border-l border-white/5" style={{ left: time * zoom }} />)}</div>
-                {tracks.map(track => (
-                    <div key={track.id} data-track-id={track.id} className="track-lane h-24 border-b border-white/5 relative bg-black/20 hover:bg-white/5 transition-colors" onDragOver={handleExternalDragOver} onDrop={(e) => handleExternalDrop(e, track.id)}>
-                        {track.clips.map(clip => {
-                            const isSelected = selectedClipId === clip.id;
-                            const isDragging = dragState.clipId === clip.id;
-                            const baseStyle = track.type === 'video' ? "bg-gradient-to-r from-blue-900/80 to-blue-800/80 border-blue-500/50" : track.type === 'audio' ? "bg-gradient-to-r from-emerald-900/80 to-emerald-800/80 border-emerald-500/50" : "bg-gradient-to-r from-amber-900/80 to-amber-800/80 border-amber-500/50";
-                            
-                            // SAFETY: Handle NaN
-                            const safeLeft = (clip.start || 0) * zoom;
-                            const safeWidth = Math.max(0, (clip.duration || 0)) * zoom;
+        {/* --- TIMELINE AREA --- */}
+        <div 
+          className="flex-1 overflow-x-auto overflow-y-hidden relative timeline-scroll bg-[#0A0A0A]" 
+          ref={scrollContainerRef}
+          onScroll={() => { /* Sync if needed */ }}
+          onClick={(e) => {
+             if((e.target as HTMLElement).classList.contains('track-lane') || (e.target as HTMLElement).classList.contains('timeline-bg')) {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const scrollLeft = e.currentTarget.scrollLeft;
+                onSeek((e.clientX - rect.left + scrollLeft) / zoom);
+                onSelectClip(null);
+             }
+          }}
+        >
+             <div className="min-w-full h-full timeline-bg relative" style={{ width: `${Math.max(2000, tracks.reduce((acc, t) => acc + t.clips.length * 100, 0) * zoom)}px` }}>
+                 
+                 {/* RULER */}
+                 <div className="h-9 border-b border-white/6 bg-[#0A0A0A]/90 backdrop-blur-md sticky top-0 z-20 w-full shadow-sm">
+                    {rulerTicks.ticks.map((time) => (
+                        <div key={time} className="absolute bottom-0 top-3 border-l border-white/10" style={{ left: time * zoom }}>
+                            <span className="absolute -top-1 left-1.5 text-[9px] font-mono text-neutral-500 select-none">
+                                {time % 60 === 0 ? (time/60 + 'm') : time}
+                            </span>
+                        </div>
+                    ))}
+                 </div>
 
-                            return (
-                              <div key={clip.id} 
-                                   className={cn("absolute top-2 bottom-2 rounded-sm border shadow-sm group select-none overflow-hidden transition-shadow", baseStyle, isSelected ? "ring-2 ring-white z-20 brightness-110" : "z-10", isDragging && "opacity-90 scale-[1.01] shadow-2xl z-50 cursor-grabbing ring-1 ring-electric-red")} 
-                                   style={{ 
-                                       left: safeLeft, 
-                                       width: safeWidth 
-                                   }} 
-                                   onMouseDown={(e) => handleMouseDown(e, clip, track.id, "MOVE")}>
-                                  
-                                  <div className="absolute left-0 top-0 bottom-0 w-3 cursor-w-resize hover:bg-white/20 z-30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" onMouseDown={(e) => handleMouseDown(e, clip, track.id, "TRIM_LEFT")}><div className="w-0.5 h-4 bg-white/70 rounded-full" /></div>
-                                  <div className="absolute right-0 top-0 bottom-0 w-3 cursor-e-resize hover:bg-white/20 z-30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" onMouseDown={(e) => handleMouseDown(e, clip, track.id, "TRIM_RIGHT")}><div className="w-0.5 h-4 bg-white/70 rounded-full" /></div>
-                                  
-                                  <div className="w-full h-full px-3 flex flex-col justify-center pointer-events-none">
-                                      <span className="text-[10px] font-bold text-white/90 truncate drop-shadow-md">{clip.name}</span>
-                                      <span className="text-[9px] text-white/50 font-mono mt-0.5">
-                                        {(clip.duration || 0).toFixed(1)}s
-                                      </span>
+                 {/* Vertical Guidelines */}
+                 <div className="absolute inset-0 pointer-events-none z-0">
+                    {rulerTicks.ticks.map(time => (
+                        <div key={time} className="absolute top-9 bottom-0 border-l border-dashed border-white/3" style={{ left: time * zoom }} />
+                    ))}
+                 </div>
+                 
+                 {/* Tracks */}
+                 <div className="relative pt-0 z-10">
+                    {tracks.map(track => (
+                        <div 
+                           key={track.id} 
+                           data-track-id={track.id} 
+                           className="track-lane h-20 border-b border-white/6 relative hover:bg-white/1 transition-colors"
+                           onDragOver={handleExternalDragOver} 
+                           onDrop={(e) => handleExternalDrop(e, track.id)}
+                        >
+                            {track.clips.map(clip => {
+                                const isDraggingThis = visualDrag.isDragging && visualDrag.clipId === clip.id;
+                                const isSelected = selectedClipId === clip.id;
+                                const currentStart = isDraggingThis ? visualDrag.start : clip.start;
+                                const currentDuration = isDraggingThis ? visualDrag.duration : clip.duration;
+                                
+                                let clipClass = "";
+                                let clipStyle = {};
+
+                                if (track.type === 'video') {
+                                    clipClass = "bg-[#1A1A1A] border-l-2 border-l-[#FF2E4D] border-y border-r border-white/10";
+                                } else if (track.type === 'audio') {
+                                    clipClass = "bg-[#111] border-l-2 border-l-emerald-500 border-y border-r border-white/10";
+                                    clipStyle = { backgroundImage: 'linear-gradient(90deg, #10b98111 1px, transparent 1px)', backgroundSize: '4px 100%' };
+                                } else {
+                                    clipClass = "bg-[#1A1A1A] border border-white/10";
+                                }
+
+                                return (
+                                  <div key={clip.id} 
+                                       className={cn(
+                                          "absolute top-2 bottom-2 rounded-[3px] overflow-hidden group transition-none select-none", 
+                                          clipClass,
+                                          isSelected ? "ring-1 ring-electric-red shadow-[0_0_20px_rgba(255,46,77,0.15)] z-20" : "hover:brightness-110 z-10",
+                                          isDraggingThis && "opacity-80 scale-[1.01] shadow-xl z-50 cursor-grabbing ring-1 ring-white/50"
+                                       )} 
+                                       style={{ 
+                                          left: currentStart * zoom, 
+                                          width: Math.max(currentDuration * zoom, 2),
+                                          ...clipStyle
+                                       }} 
+                                       onMouseDown={(e) => handleMouseDown(e, clip, track.id, "MOVE")}
+                                  >
+                                      {track.type === 'audio' && (
+                                         <div className="absolute inset-0 flex items-center opacity-30 pointer-events-none">
+                                              <div className="w-full h-2/3 bg-linear-to-b from-emerald-500/0 via-emerald-500/30 to-emerald-500/0"></div>
+                                         </div>
+                                      )}
+
+                                      {/* Handles */}
+                                      <div className={cn("absolute left-0 top-0 bottom-0 w-3 z-30 opacity-0 group-hover:opacity-100 cursor-w-resize bg-linear-to-r from-black/80 to-transparent hover:from-electric-red/80 transition-all")} onMouseDown={(e) => handleMouseDown(e, clip, track.id, "TRIM_LEFT")} />
+                                      <div className={cn("absolute right-0 top-0 bottom-0 w-3 z-30 opacity-0 group-hover:opacity-100 cursor-e-resize bg-linear-to-l from-black/80 to-transparent hover:from-electric-red/80 transition-all")} onMouseDown={(e) => handleMouseDown(e, clip, track.id, "TRIM_RIGHT")} />
+                                      
+                                      <div className="relative w-full h-full px-2 py-1 flex flex-col justify-center pointer-events-none">
+                                          <div className="flex items-center gap-1.5 overflow-hidden">
+                                              <span className={cn("text-[10px] font-bold truncate tracking-tight drop-shadow-md", isSelected ? "text-white" : "text-neutral-300")}>
+                                                  {clip.name}
+                                              </span>
+                                          </div>
+                                          {zoom > 10 && <span className="text-[8px] text-neutral-500 font-mono mt-0.5 opacity-80">{currentDuration.toFixed(1)}s</span>}
+                                      </div>
                                   </div>
-                              </div>
-                            );
-                        })}
+                                );
+                            })}
+                        </div>
+                    ))}
+                    
+                    {/* --- PLAYHEAD (NEON RED) --- */}
+                    <div className="absolute top-0 bottom-0 z-50 pointer-events-none" style={{ transform: `translateX(${currentTime * zoom}px)` }}>
+                        <div className="w-px h-full bg-electric-red shadow-[0_0_10px_2px_rgba(255,46,77,0.5)]" />
+                        <div className="absolute top-0 -left-1.5 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-8 border-t-electric-red drop-shadow-[0_0_10px_rgba(255,46,77,0.8)]" />
                     </div>
-                ))}
-                <div className="absolute top-0 bottom-0 z-50 pointer-events-none" style={{ transform: `translateX(${currentTime * zoom}px)` }}>
-                    <div className="w-px h-full bg-electric-red shadow-[0_0_8px_rgba(255,46,77,0.8)]" /><div className="absolute top-0 -left-1.5 w-3 h-3 bg-electric-red" style={{ clipPath: "polygon(0% 0%, 100% 0%, 50% 100%)"}} />
-                </div>
+                 </div>
              </div>
         </div>
       </div>
     </div>
+    </>
   );
 }
