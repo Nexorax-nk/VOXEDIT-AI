@@ -30,7 +30,7 @@ const MENU_ITEMS: { id: ToolId; label: string; icon: React.ElementType }[] = [
 
 export default function Sidebar({ activeTool, onChange }: SidebarProps) {
   return (
-    <aside className="w-18 h-full bg-black flex flex-col items-center py-4 z-50 select-none border-r border-border-gray/20">
+    <aside className="w-18 h-full bg-[#1f1e1e] flex flex-col items-center py-4 z-50 select-none border-r border-border-gray/20">
       {/* --- Top Logo --- */}
       <div className="mb-8 flex flex-col items-center justify-center group cursor-pointer">
         <div className="w-12 h-12 rounded-lg flex items-center justify-center bg-linear-to-br from-black via-neutral-900 to-neutral-800 border border-neutral-700 shadow-[0_0_20px_rgba(255,46,77,0.45)] transition-all duration-300 ease-out group-hover:scale-110 group-hover:border-[rgba(255,46,77,0.6)] group-hover:shadow-[0_0_40px_rgba(255,46,77,0.85)]">

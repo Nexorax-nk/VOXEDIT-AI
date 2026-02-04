@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState } from "react";
 import { 
   Play, Maximize2, Settings, 
-  Activity, Monitor, Signal, Wifi 
+  Activity, Monitor, Signal 
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -18,7 +18,7 @@ interface PlayerProps {
   onTogglePlay: () => void;
 }
 
-// Helper for Pro Timecode Display (MM:SS:MS)
+// Minimal MM:SS:MS
 const formatTimecode = (time: number) => {
   const m = Math.floor(time / 60).toString().padStart(2, '0');
   const s = Math.floor(time % 60).toString().padStart(2, '0');
@@ -48,13 +48,12 @@ export default function Player({
     }
   }, [isPlaying]);
 
-  // Sync Time (Logic: GlobalTime - ClipStart + Offset)
+  // Sync Time
   useEffect(() => {
     if (videoRef.current && src) {
         const relativeTime = currentTime - clipStartTime;
         const fileTime = Math.max(0, relativeTime + clipOffset);
         
-        // Seek only if difference is significant (prevents stutter)
         if (Math.abs(videoRef.current.currentTime - fileTime) > 0.25) {
             videoRef.current.currentTime = fileTime;
         }
@@ -64,53 +63,42 @@ export default function Player({
   const handleVideoTimeUpdate = () => {
       if (videoRef.current && isPlaying) {
           const fileTime = videoRef.current.currentTime;
-          // Reverse Logic: Global = FileTime - Offset + ClipStart
           onTimeUpdate(fileTime - clipOffset + clipStartTime);
       }
   };
 
   return (
     <div className="flex-1 relative flex flex-col bg-[#09090b] overflow-hidden w-full h-full">
-      {/* Background Grid Pattern */}
-      <div className="absolute inset-0 opacity-[0.03] pointer-events-none" 
-           style={{ backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', backgroundSize: '24px 24px' }} 
+      {/* Subtle Background Grid */}
+      <div className="absolute inset-0 opacity-[0.02] pointer-events-none" 
+           style={{ backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', backgroundSize: '32px 32px' }} 
       />
 
-      {/* Main Viewport Container */}
-      {/* UPDATE: Reduced padding (p-4) and removed max-w restriction so it fills the panel */}
       <div className="flex-1 flex items-center justify-center p-4 relative z-10 w-full h-full">
         
         {/* The Video Frame */}
         <div 
-            className="aspect-video w-full h-full max-h-full bg-black rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/10 relative overflow-hidden group select-none ring-1 ring-white/5 object-contain"
+            className="aspect-video w-full h-full max-h-full bg-black rounded-lg shadow-2xl border border-white/5 relative overflow-hidden group select-none ring-1 ring-white/5 object-contain"
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
         >
           
-          {/* --- TOP HUD OVERLAY --- */}
+          {/* --- TOP HUD (Minimal) --- */}
           <div className={cn(
-              "absolute top-0 left-0 right-0 h-16 bg-linear-to-b from-black/80 to-transparent z-20 flex justify-between items-start p-4 transition-opacity duration-300",
+              "absolute top-0 left-0 right-0 h-12 bg-gradient-to-b from-black/60 to-transparent z-20 flex justify-between items-start px-4 py-3 transition-opacity duration-300",
               src ? "opacity-100" : "opacity-30"
           )}>
+              {/* Status Badge */}
               <div className="flex items-center gap-3">
-                  <div className={cn("px-2 py-1 rounded bg-white/10 border border-white/10 backdrop-blur-sm text-[10px] font-mono font-bold tracking-widest flex items-center gap-2 text-neutral-300", isPlaying && "text-electric-red border-electric-red/30 bg-electric-red/10")}>
-                      {isPlaying ? <Activity className="w-3 h-3 animate-pulse" /> : <Monitor className="w-3 h-3" />}
-                      {isPlaying ? "LIVE PREVIEW" : "MONITOR"}
-                  </div>
-                  <div className="text-[10px] font-mono text-neutral-500 hidden sm:block">
-                      SRC: {src ? src.split('/').pop()?.slice(0, 20) + (src.length > 20 ? "..." : "") : "NULL"}
+                  <div className={cn("px-1.5 py-0.5 rounded-sm bg-black/40 backdrop-blur-md border border-white/10 text-[9px] font-medium tracking-wider flex items-center gap-1.5 text-neutral-400", isPlaying && "text-red-500 border-red-500/20 bg-red-500/5")}>
+                      {isPlaying ? <Activity className="w-2.5 h-2.5" /> : <Monitor className="w-2.5 h-2.5" />}
+                      {isPlaying ? "LIVE" : "READY"}
                   </div>
               </div>
 
-              <div className="flex items-center gap-4">
-                 <div className="flex flex-col items-end">
-                    <span className="text-xl font-mono font-bold text-white tracking-widest tabular-nums shadow-black drop-shadow-md">
-                        {formatTimecode(currentTime)}
-                    </span>
-                    <span className="text-[9px] text-neutral-500 uppercase tracking-widest font-mono">
-                        Global Timecode
-                    </span>
-                 </div>
+              {/* Minimal Timecode */}
+              <div className="font-mono text-xs text-white/80 tracking-widest tabular-nums opacity-80">
+                  {formatTimecode(currentTime)}
               </div>
           </div>
 
@@ -126,58 +114,48 @@ export default function Player({
               onClick={onTogglePlay}
             />
           ) : (
-             // --- EMPTY STATE (NO SIGNAL) ---
+             // --- EMPTY STATE ---
              <div className="w-full h-full flex flex-col items-center justify-center bg-[#050505] relative overflow-hidden">
-                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 brightness-50 contrast-150" />
-                <div className="z-10 flex flex-col items-center gap-4 opacity-50">
-                   <div className="w-20 h-20 rounded-full border-2 border-dashed border-white/10 flex items-center justify-center animate-[spin_10s_linear_infinite]">
-                      <Signal className="w-8 h-8 text-neutral-600" />
-                   </div>
-                   <div className="text-center">
-                       <p className="text-neutral-500 font-bold text-sm tracking-[0.3em] mb-1">NO SIGNAL</p>
-                       <p className="text-neutral-700 text-[10px] font-mono">SELECT A CLIP TO PREVIEW</p>
-                   </div>
+                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-5 brightness-50" />
+                <div className="z-10 flex flex-col items-center gap-3 opacity-40">
+                   <Signal className="w-6 h-6 text-neutral-700" />
+                   <p className="text-neutral-600 text-[10px] font-mono tracking-widest">NO SIGNAL</p>
                 </div>
              </div>
           )}
 
-          {/* --- CENTER PLAY BUTTON --- */}
+          {/* --- CENTER PLAY BUTTON (Minimalist) --- */}
           {src && !isPlaying && (
             <div 
                 onClick={onTogglePlay} 
-                className="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-[1px] cursor-pointer group/btn transition-all duration-300"
+                className="absolute inset-0 flex items-center justify-center bg-black/10 backdrop-blur-[1px] cursor-pointer group/btn transition-all duration-300"
             >
-               <div className="w-20 h-20 bg-white/5 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 shadow-[0_0_30px_rgba(0,0,0,0.3)] group-hover/btn:scale-110 group-hover/btn:bg-electric-red group-hover/btn:border-electric-red transition-all duration-300">
-                 <Play className="w-8 h-8 text-white ml-1 fill-white" />
+               <div className="w-16 h-16 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/10 shadow-lg group-hover/btn:scale-105 group-hover/btn:bg-white/20 transition-all duration-300">
+                 <Play className="w-6 h-6 text-white ml-1 fill-white opacity-90" />
                </div>
             </div>
           )}
 
-          {/* --- BOTTOM HUD OVERLAY --- */}
+          {/* --- BOTTOM HUD (Clean) --- */}
           <div className={cn(
-              "absolute bottom-0 left-0 right-0 h-14 bg-linear-to-t from-black/90 to-transparent z-20 flex justify-between items-end p-4 transition-opacity duration-300 pointer-events-none",
+              "absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-black/60 to-transparent z-20 flex justify-end items-end px-4 py-3 transition-opacity duration-300 pointer-events-none",
               (isHovered || !isPlaying) ? "opacity-100" : "opacity-0"
           )}>
-               <div className="flex items-center gap-4 text-white/50">
-                  <Wifi className="w-3 h-3" />
-                  <span className="text-[9px] font-mono tracking-widest">1920x1080 • 60FPS</span>
-               </div>
-               
-               <div className="flex gap-2 pointer-events-auto">
-                   <button className="p-1.5 hover:bg-white/10 rounded transition-colors text-white/70 hover:text-white">
-                      <Settings className="w-4 h-4" />
+               <div className="flex gap-1 pointer-events-auto">
+                   <button className="p-1.5 hover:bg-white/10 rounded-md transition-colors text-white/60 hover:text-white">
+                      <Settings className="w-3.5 h-3.5" />
                    </button>
-                   <button className="p-1.5 hover:bg-white/10 rounded transition-colors text-white/70 hover:text-white">
-                      <Maximize2 className="w-4 h-4" />
+                   <button className="p-1.5 hover:bg-white/10 rounded-md transition-colors text-white/60 hover:text-white">
+                      <Maximize2 className="w-3.5 h-3.5" />
                    </button>
                </div>
           </div>
 
-          {/* --- CORNER MARKERS (Viewfinder Effect) --- */}
-          <div className="absolute top-4 left-4 w-4 h-4 border-t-2 border-l-2 border-white/20 rounded-tl-sm pointer-events-none" />
-          <div className="absolute top-4 right-4 w-4 h-4 border-t-2 border-r-2 border-white/20 rounded-tr-sm pointer-events-none" />
-          <div className="absolute bottom-4 left-4 w-4 h-4 border-b-2 border-l-2 border-white/20 rounded-bl-sm pointer-events-none" />
-          <div className="absolute bottom-4 right-4 w-4 h-4 border-b-2 border-r-2 border-white/20 rounded-br-sm pointer-events-none" />
+          {/* --- CORNER MARKERS (Minimal Viewfinder) --- */}
+          <div className="absolute top-3 left-3 w-3 h-3 border-t border-l border-white/20 rounded-tl-[1px] pointer-events-none" />
+          <div className="absolute top-3 right-3 w-3 h-3 border-t border-r border-white/20 rounded-tr-[1px] pointer-events-none" />
+          <div className="absolute bottom-3 left-3 w-3 h-3 border-b border-l border-white/20 rounded-bl-[1px] pointer-events-none" />
+          <div className="absolute bottom-3 right-3 w-3 h-3 border-b border-r border-white/20 rounded-br-[1px] pointer-events-none" />
 
         </div>
       </div>

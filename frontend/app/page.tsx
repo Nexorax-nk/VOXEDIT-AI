@@ -256,10 +256,10 @@ export default function EditorPage() {
   };
 
   return (
-    // 1. MASTER CONTAINER: Screen height, no outer scroll
+    // 1. MASTER CONTAINER
     <main className="flex h-screen w-screen bg-[#09090b] overflow-hidden text-neutral-200 font-sans selection:bg-electric-red selection:text-white">
       
-      {/* 2. SIDEBAR (Fixed Width) */}
+      {/* 2. SIDEBAR */}
       <Sidebar activeTool={activeTool} onChange={setActiveTool} />
       
       {/* 3. MAIN CONTENT COLUMN */}
@@ -273,39 +273,63 @@ export default function EditorPage() {
         {/* WORKSPACE AREA */}
         <div className="flex-1 flex overflow-hidden relative">
           
-          {/* LEFT PANEL (Tools) */}
-          <ToolsPanel 
-              activeTool={activeTool} 
-              onMediaSelect={() => {}} // Connect to drag start if needed, or keep empty
-              selectedClip={getSelectedClipObject()}
-              onUpdateProcessedClip={handleAiProcessingComplete}
-          />
+          {/* LEFT PANEL (Tools) - w-72 (288px) */}
+          <div className="w-85 shrink-0 flex flex-col border-r border-white/10 bg-[#3a3a3a] z-20">
+              <ToolsPanel 
+                  activeTool={activeTool} 
+                  onMediaSelect={() => {}} 
+                  selectedClip={getSelectedClipObject()}
+                  onUpdateProcessedClip={handleAiProcessingComplete}
+              />
+          </div>
           
-          {/* RIGHT COLUMN (Player + Timeline) */}
-          <div className="flex flex-col flex-1 min-w-0 bg-[#050505] relative border-l border-white/5 z-0">
+          {/* RIGHT COLUMN (Player + Log + Timeline) */}
+          <div className="flex flex-col flex-1 min-w-0 bg-[#1f1e1e] relative border-l border-[#272626] z-0">
             
-            {/* TOP: PLAYER (Flexible Height) */}
-            <div className="flex-1 relative min-h-0 overflow-hidden flex flex-col">
-               {/* Player Component Wrapper */}
-               <div className="w-full h-full p-4 flex items-center justify-center">
-                    <Player 
-                      src={playerSrc} 
-                      currentTime={currentTime} 
-                      isPlaying={isPlaying} 
-                      onTimeUpdate={setCurrentTime} 
-                      onDurationChange={()=>{}} 
-                      onTogglePlay={() => setIsPlaying(!isPlaying)}
-                      clipStartTime={playerClipStart}
-                      clipOffset={playerClipOffset}
-                    />
-               </div>
-               
-               {/* Hidden Audio Element */}
-               {audioSrc && <audio ref={audioRef} src={audioSrc} className="hidden" />}
+            {/* TOP SPLIT: PLAYER & LOG */}
+            <div className="flex-1 flex min-h-0 overflow-hidden bg-[#1f1e1e]">
+                
+                {/* 1. PLAYER CONTAINER - Fits Available Space Perfectly */}
+                <div className="flex-1 flex items-center justify-center relative overflow-hidden">
+                    {/* The Player component will stretch to fill this container */}
+                    <div className="w-full h-full flex items-center justify-center p-4">
+                        <Player 
+                          src={playerSrc} 
+                          currentTime={currentTime} 
+                          isPlaying={isPlaying} 
+                          onTimeUpdate={setCurrentTime} 
+                          onDurationChange={()=>{}} 
+                          onTogglePlay={() => setIsPlaying(!isPlaying)}
+                          clipStartTime={playerClipStart}
+                          clipOffset={playerClipOffset}
+                        />
+                    </div>
+                </div>
+
+                {/* 2. REASONING LOG (Agent Brain) - w-80 (320px) */}
+                <div className="w-90 bg-[#09090b] border-l border-white/10 flex flex-col z-20 shadow-xl">
+                    {/* Log Header */}
+                    <div className="h-10 border-b border-white/10 flex items-center justify-between px-4 bg-[#121212]">
+                         <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+                            <span className="text-[10px] font-mono font-bold text-gray-400 uppercase tracking-widest">VoxAgent</span>
+                         </div>
+                         <span className="text-[9px] text-gray-600 font-mono">GEMINI-1.5-PRO</span>
+                    </div>
+
+                    {/* Log Stream - STARTED EMPTY */}
+                    <div className="flex-1 p-4 overflow-y-auto font-mono text-xs space-y-3">
+                         {/* Logs will appear here dynamically */}
+                    </div>
+                </div>
+
             </div>
 
+            {/* Hidden Audio Element */}
+            {audioSrc && <audio ref={audioRef} src={audioSrc} className="hidden" />}
+
             {/* BOTTOM: TIMELINE (Fixed Height) */}
-            <div className="h-85 shrink-0 border-t border-white/10 bg-[#09090b] z-30 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] relative">
+            <div className="h-80 shrink-0 border-t border-white/10 bg-[#757777] z-30 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] relative">
                <Timeline 
                   tracks={tracks} 
                   currentTime={currentTime} 

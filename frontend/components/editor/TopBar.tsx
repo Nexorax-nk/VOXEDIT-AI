@@ -10,7 +10,7 @@ interface TopBarProps {
 
 export default function TopBar({ onExport, isExporting = false }: TopBarProps) {
   return (
-    <header className="h-16 border-b border-border-gray bg-bg-black flex items-center px-6 justify-between shrink-0 z-20">
+    <header className="h-16 border-b border-border-gray bg-[#000000] flex items-center px-6 justify-between shrink-0 z-20">
       
       {/* --- Left: Logo & Branding --- */}
       <div className="flex items-center gap-3">

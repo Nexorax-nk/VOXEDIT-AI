@@ -101,7 +101,7 @@ const MediaPanel = ({
             "w-full py-6 rounded-xl border border-dashed flex flex-col items-center justify-center gap-2 transition-all group relative overflow-hidden",
             isUploading 
               ? "border-white/10 opacity-50 cursor-wait bg-white/5" 
-              : "border-white/10 hover:border-[#FF2E4D] hover:bg-[#FF2E4D]/5 active:scale-[0.99]"
+              : "border-white/10 hover:border-[#FF2E4D] hover:bg-electric-red/5 active:scale-[0.99]"
           )}
         >
           {isUploading ? (
@@ -134,7 +134,7 @@ const MediaPanel = ({
                 draggable
                 onDragStart={(e) => handleDragStart(e, file)}
                 onClick={() => onSelect?.(file.url)}
-                className="relative aspect-video bg-[#141414] rounded-lg overflow-hidden border border-white/5 cursor-grab active:cursor-grabbing group hover:border-[#FF2E4D]/50 transition-all shadow-md hover:shadow-[#FF2E4D]/10"
+                className="relative aspect-video bg-[#141414] rounded-lg overflow-hidden border border-white/5 cursor-grab active:cursor-grabbing group hover:border-electric-red/50 transition-all shadow-md hover:shadow-electric-red/10"
               >
                 {file.type === "video" ? (
                   <video src={file.url} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity duration-300" />
@@ -142,12 +142,12 @@ const MediaPanel = ({
                   <img src={file.url} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity duration-300" />
                 )}
                 
-                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2.5">
-                   <div className="flex items-center gap-2 mb-0.5">
-                       <div className="w-1 h-3 bg-[#FF2E4D] rounded-full shadow-[0_0_8px_#FF2E4D]" />
-                       <p className="text-[10px] text-white font-bold truncate w-full tracking-wide">{file.name}</p>
-                   </div>
-                   <p className="text-[9px] text-neutral-400 pl-3 font-mono">{file.duration.toFixed(1)}s</p>
+                <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2.5">
+                    <div className="flex items-center gap-2 mb-0.5">
+                        <div className="w-1 h-3 bg-[#FF2E4D] rounded-full shadow-[0_0_8px_#FF2E4D]" />
+                        <p className="text-[10px] text-white font-bold truncate w-full tracking-wide">{file.name}</p>
+                    </div>
+                    <p className="text-[9px] text-neutral-400 pl-3 font-mono">{file.duration.toFixed(1)}s</p>
                 </div>
               </div>
             ))}
@@ -654,7 +654,8 @@ export default function ToolsPanel({ activeTool, onMediaSelect, selectedClip, on
   };
 
   return (
-    <div className="w-[360px] bg-[#09090b] border-r border-white/5 flex flex-col shrink-0 z-20 shadow-[4px_0_30px_rgba(0,0,0,0.5)] h-full">
+    // UPDATED: w-full (fits parent), removed z-index, removed shadow
+    <div className="w-full bg-[#09090b] border-r border-white/5 flex flex-col shrink-0 h-full">
       <div className="h-14 border-b border-white/5 flex items-center justify-between px-6 bg-[#09090b]">
         <h2 className="text-neutral-300 text-[10px] uppercase tracking-[0.2em] font-bold flex items-center gap-3">
             <div className="relative">
