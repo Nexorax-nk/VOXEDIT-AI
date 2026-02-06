@@ -288,16 +288,16 @@ export default function Timeline({
     >
       
       {/* --- TOOLBAR --- */}
-      <div className="h-10 border-b border-white/6 flex items-center justify-between px-4 bg-[#0A0A0A] shrink-0 z-40 relative">
+      <div className="h-10.7 border-b border-white/6 flex items-center justify-between px-4 bg-[#141414] shrink-0 z-40 relative">
          <div className="flex gap-3 items-center">
-             <div className="flex bg-[#111] p-0.5 rounded-lg border border-white/6">
+             <div className="flex bg-[#111] p-0.5 rounded-lg ">
                 <button 
                   onClick={handleSplit} 
                   disabled={!selectedClipId} 
                   className={cn(
                       "flex items-center gap-2 px-3 py-1.5 rounded-sm text-[10px] font-bold tracking-wider uppercase transition-all",
                       selectedClipId 
-                          ? "text-electric-red hover:bg-electric-red/10 hover:shadow-[0_0_15px_rgba(255,46,77,0.2)]" 
+                          ? "text-[#ff0000] hover:bg-electric-red/10 hover:shadow-[0_0_15px_rgba(255,46,77,0.2)]" 
                           : "text-neutral-600 cursor-not-allowed"
                   )}
                 >
@@ -310,7 +310,7 @@ export default function Timeline({
                   disabled={!selectedClipId} 
                   className={cn(
                     "p-1.5 rounded-sm transition-colors",
-                    selectedClipId ? "text-neutral-500 hover:text-electric-red hover:bg-electric-red/10" : "text-neutral-700 cursor-not-allowed"
+                    selectedClipId ? "text-neutral-500 hover:text-[#ff0000] hover:bg-electric-red/10" : "text-neutral-700 cursor-not-allowed"
                   )}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -318,7 +318,7 @@ export default function Timeline({
              </div>
          </div>
          
-         <div className="absolute left-1/2 -translate-x-1/2 font-mono text-xs font-semibold text-electric-red tracking-widest bg-electric-red/5 px-4 py-1.5 rounded-full border border-electric-red/20 shadow-[0_0_20px_rgba(255,46,77,0.1)]">
+         <div className="absolute left-1/2 -translate-x-1/2 font-mono text-xs font-semibold text-[#ff0000] tracking-widest bg-[#000000] px-4 py-1.5 rounded-full border border-electric-red/20 shadow-[0_0_20px_rgba(255,46,77,0.1)]">
             {new Date(currentTime * 1000).toISOString().substr(11, 8)}
             <span className="text-neutral-500 text-[10px] ml-1">{(currentTime % 1).toFixed(2).substring(1)}</span>
          </div>
@@ -327,7 +327,7 @@ export default function Timeline({
              <div className="flex items-center gap-2 bg-[#111] px-2 py-1 rounded-lg border border-white/6">
                 <button onClick={() => setZoom(z => Math.max(z - 10, 2))} className="p-1 hover:text-white transition-colors text-neutral-500"><ZoomOut className="w-3.5 h-3.5" /></button>
                 <div className="w-20 h-1 bg-neutral-800 rounded-full overflow-hidden relative">
-                    <div className="absolute left-0 top-0 bottom-0 bg-electric-red shadow-[0_0_10px_#FF2E4D]" style={{ width: `${Math.min(zoom/3, 100)}%` }} />
+                    <div className="absolute left-0 top-0 bottom-0 bg-[#ff0000] shadow-[0_0_10px_#FF2E4D]" style={{ width: `${Math.min(zoom/3, 100)}%` }} />
                 </div>
                 <button onClick={() => setZoom(z => Math.min(z + 10, 300))} className="p-1 hover:text-white transition-colors text-neutral-500"><ZoomIn className="w-3.5 h-3.5" /></button>
              </div>
@@ -339,20 +339,20 @@ export default function Timeline({
         {/* --- LEFT HEADER --- */}
         <div className="w-56 bg-[#0E0E0E] border-r border-white/6 flex flex-col shrink-0 z-30">
              <div className="h-9 border-b border-white/6 bg-[#0E0E0E] flex items-center px-4">
-                 <span className="text-[10px] font-bold text-neutral-500 tracking-[0.2em] uppercase flex items-center gap-2">
-                    <Layers className="w-3 h-3 text-electric-red" /> Layers
+                 <span className="text-[9px] font-bold text-neutral-500 tracking-[0.2em] uppercase flex items-center gap-2">
+
                  </span>
              </div>
              
              <div className="flex-1 overflow-hidden relative">
                {tracks.map(track => (
                   <div key={track.id} className="h-20 border-b border-white/6 flex flex-col justify-center px-4 hover:bg-white/2 transition-colors group relative">
-                      <div className="absolute left-0 top-0 bottom-0 w-0.75 bg-electric-red opacity-0 group-hover:opacity-100 transition-opacity shadow-[0_0_12px_#FF2E4D]" />
+                      <div className="absolute left-0 top-0 bottom-0 w-0.75 bg-[#ff0000] opacity-0 group-hover:opacity-100 transition-opacity shadow-[0_0_12px_#FF2E4D]" />
                       <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-3">
                               <div className={cn(
                                 "p-1.5 rounded bg-neutral-900 border border-white/5 transition-colors",
-                                track.type === 'video' ? "text-blue-400" : track.type === 'audio' ? "text-emerald-400" : "text-white"
+                                track.type === 'video' ? "text-[#ff0000]" : track.type === 'audio' ? "text-[#ff0000]" : "text-[#ff0000]"
                               )}>
                                    {getTrackIcon(track.type)}
                               </div>
@@ -387,7 +387,7 @@ export default function Timeline({
              <div className="min-w-full h-full timeline-bg relative" style={{ width: `${Math.max(2000, tracks.reduce((acc, t) => acc + t.clips.length * 100, 0) * zoom)}px` }}>
                  
                  {/* RULER */}
-                 <div className="h-9 border-b border-white/6 bg-[#0A0A0A]/90 backdrop-blur-md sticky top-0 z-20 w-full shadow-sm">
+                 <div className="h-9 border-b border-white/6 bg-[#0A0A0A] backdrop-blur-md sticky top-0 z-20 w-full shadow-sm">
                     {rulerTicks.ticks.map((time) => (
                         <div key={time} className="absolute bottom-0 top-3 border-l border-white/10" style={{ left: time * zoom }}>
                             <span className="absolute -top-1 left-1.5 text-[9px] font-mono text-neutral-500 select-none">
@@ -437,7 +437,7 @@ export default function Timeline({
                                        className={cn(
                                           "absolute top-2 bottom-2 rounded-[3px] overflow-hidden group transition-none select-none", 
                                           clipClass,
-                                          isSelected ? "ring-1 ring-electric-red shadow-[0_0_20px_rgba(255,46,77,0.15)] z-20" : "hover:brightness-110 z-10",
+                                          isSelected ? "ring-1 ring-[#ff0000] shadow-[0_0_20px_rgba(255,46,77,0.15)] z-20" : "hover:brightness-110 z-10",
                                           isDraggingThis && "opacity-80 scale-[1.01] shadow-xl z-50 cursor-grabbing ring-1 ring-white/50"
                                        )} 
                                        style={{ 
@@ -473,8 +473,8 @@ export default function Timeline({
                     
                     {/* --- PLAYHEAD (NEON RED) --- */}
                     <div className="absolute top-0 bottom-0 z-50 pointer-events-none" style={{ transform: `translateX(${currentTime * zoom}px)` }}>
-                        <div className="w-px h-full bg-electric-red shadow-[0_0_10px_2px_rgba(255,46,77,0.5)]" />
-                        <div className="absolute top-0 -left-1.5 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-8 border-t-electric-red drop-shadow-[0_0_10px_rgba(255,46,77,0.8)]" />
+                        <div className="w-px h-full bg-[#ff0000] shadow-[0_0_10px_2px_rgba(255,46,77,0.5)]" />
+                        <div className="absolute top-0 -left-1.5 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-8 border-[#ff0000] drop-shadow-[0_0_10px_rgba(255,46,77,0.8)]" />
                     </div>
                  </div>
              </div>
