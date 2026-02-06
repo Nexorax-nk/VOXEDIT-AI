@@ -329,7 +329,7 @@ export default function EditorPage() {
             {audioSrc && <audio ref={audioRef} src={audioSrc} className="hidden" />}
 
             {/* BOTTOM: TIMELINE (Fixed Height) */}
-            <div className="h-80 shrink-0 border-t border-white/10 bg-[#757777] z-30 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] relative">
+            <div className="h-79 shrink-0 border-t border-white/10 bg-[#757777] z-30 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] relative">
                <Timeline 
                   tracks={tracks} 
                   currentTime={currentTime} 

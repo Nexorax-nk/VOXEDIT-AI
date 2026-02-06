@@ -288,7 +288,7 @@ export default function Timeline({
     >
       
       {/* --- TOOLBAR --- */}
-      <div className="h-12 border-b border-white/6 flex items-center justify-between px-4 bg-[#0A0A0A] shrink-0 z-40 relative">
+      <div className="h-10 border-b border-white/6 flex items-center justify-between px-4 bg-[#0A0A0A] shrink-0 z-40 relative">
          <div className="flex gap-3 items-center">
              <div className="flex bg-[#111] p-0.5 rounded-lg border border-white/6">
                 <button 
