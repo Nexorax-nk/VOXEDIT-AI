@@ -34,7 +34,7 @@ export default function Sidebar({ activeTool, onChange }: SidebarProps) {
       {/* --- Top Logo --- */}
       <div className="mb-8 flex flex-col items-center justify-center group cursor-pointer">
         <div className="w-12 h-12 rounded-lg flex items-center justify-center bg-linear-to-br from-black via-neutral-900 to-neutral-800 border border-neutral-700 shadow-[0_0_20px_rgba(255,46,77,0.45)] transition-all duration-300 ease-out group-hover:scale-110 group-hover:border-[rgba(255,46,77,0.6)] group-hover:shadow-[0_0_40px_rgba(255,46,77,0.85)]">
-          <span className="text-electric-red font-extrabold text-2xl tracking-widest drop-shadow-[0_0_8px_rgba(255,46,77,0.9)]">
+          <span className="text-[#ff0000] font-extrabold text-2xl tracking-widest drop-shadow-[0_0_8px_rgba(255,46,77,0.9)]">
             V
           </span>
         </div>
@@ -56,12 +56,12 @@ export default function Sidebar({ activeTool, onChange }: SidebarProps) {
               )}
             >
               {isActive && (
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-electric-red rounded-r-full shadow-[0_0_10px_#FF2E4D]" />
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-[#ff0000] rounded-r-full shadow-[0_0_10px_#FF2E4D]" />
               )}
               <item.icon 
                 className={cn(
                   "w-6 h-6 mb-1.5 transition-transform duration-200",
-                  isActive ? "text-electric-red" : "group-hover:scale-110"
+                  isActive ? "text-[#ff0000]" : "group-hover:scale-110"
                 )} 
               />
               <span className="text-[10px] font-medium tracking-wide text-center leading-tight">
@@ -78,7 +78,7 @@ export default function Sidebar({ activeTool, onChange }: SidebarProps) {
           onClick={() => onChange("settings")}
           className={cn(
             "group w-full flex flex-col items-center justify-center py-3 rounded-xl transition-colors",
-            activeTool === "settings" ? "text-electric-red bg-bg-lighter" : "text-text-secondary hover:text-white hover:bg-bg-lighter/50"
+            activeTool === "settings" ? "text-[#ff0000] bg-bg-lighter" : "text-text-secondary hover:text-white hover:bg-bg-lighter/50"
           )}
         >
           <Settings className="w-6 h-6 mb-1.5" />

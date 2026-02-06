@@ -101,17 +101,17 @@ const MediaPanel = ({
             "w-full py-6 rounded-xl border border-dashed flex flex-col items-center justify-center gap-2 transition-all group relative overflow-hidden",
             isUploading 
               ? "border-white/10 opacity-50 cursor-wait bg-white/5" 
-              : "border-white/10 hover:border-[#FF2E4D] hover:bg-electric-red/5 active:scale-[0.99]"
+              : "border-white/10 hover:border-[#ff0000] hover:bg-electric-red/5 active:scale-[0.99]"
           )}
         >
           {isUploading ? (
             <div className="flex flex-col items-center gap-2">
-                <Loader2 className="w-5 h-5 animate-spin text-[#FF2E4D]" />
+                <Loader2 className="w-5 h-5 animate-spin text-[#ff0000]" />
                 <span className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold">Uploading...</span>
             </div>
           ) : (
             <>
-              <div className="p-3 rounded-full bg-[#18181b] group-hover:bg-[#FF2E4D] transition-colors shadow-lg">
+              <div className="p-3 rounded-full bg-[#18181b] group-hover:bg-[#ff0000] transition-colors shadow-lg">
                   <Plus className="w-5 h-5 text-neutral-400 group-hover:text-white" />
               </div>
               <span className="text-xs font-medium text-neutral-400 group-hover:text-white mt-1">Import Media</span>
@@ -144,7 +144,7 @@ const MediaPanel = ({
                 
                 <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2.5">
                     <div className="flex items-center gap-2 mb-0.5">
-                        <div className="w-1 h-3 bg-[#FF2E4D] rounded-full shadow-[0_0_8px_#FF2E4D]" />
+                        <div className="w-1 h-3 bg-[#ff0000] rounded-full shadow-[0_0_8px_#FF2E4D]" />
                         <p className="text-[10px] text-white font-bold truncate w-full tracking-wide">{file.name}</p>
                     </div>
                     <p className="text-[9px] text-neutral-400 pl-3 font-mono">{file.duration.toFixed(1)}s</p>
@@ -335,7 +335,7 @@ const CopilotPanel = ({
                 className={cn(
                     "flex items-center gap-2 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all duration-300", 
                     mode === "chat" 
-                        ? "bg-[#FF2E4D] text-white shadow-[0_2px_10px_rgba(255,46,77,0.3)]" 
+                        ? "bg-[#ff0000] text-white shadow-[0_2px_10px_rgba(255,46,77,0.3)]" 
                         : "text-neutral-500 hover:text-white"
                 )}
               >
@@ -346,14 +346,14 @@ const CopilotPanel = ({
                 className={cn(
                     "flex items-center gap-2 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all duration-300", 
                     mode === "voice" 
-                        ? "bg-[#FF2E4D] text-white shadow-[0_2px_10px_rgba(255,46,77,0.3)]" 
+                        ? "bg-[#ff0000] text-white shadow-[0_2px_10px_rgba(255,46,77,0.3)]" 
                         : "text-neutral-500 hover:text-white"
                 )}
               >
                   <Mic className="w-3 h-3" /> Voice
               </button>
           </div>
-          <button onClick={handleClearChat} className="p-2 rounded-full hover:bg-white/5 text-neutral-600 hover:text-[#FF2E4D] transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+          <button onClick={handleClearChat} className="p-2 rounded-full hover:bg-white/5 text-neutral-600 hover:text-[#ff0000] transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
 
       {/* --- CHAT AREA --- */}
@@ -363,7 +363,7 @@ const CopilotPanel = ({
             <div className={cn(
               "w-8 h-8 rounded-full flex items-center justify-center shrink-0 border shadow-sm",
               msg.role === "ai" 
-                ? "bg-[#141414] border-[#FF2E4D]/20 text-[#FF2E4D]" 
+                ? "bg-[#141414] border-[#330109] text-[#ff0000]" 
                 : "bg-[#222] border-white/5 text-white"
             )}>
               {msg.role === "ai" ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
@@ -371,8 +371,8 @@ const CopilotPanel = ({
             <div className={cn(
               "p-3.5 rounded-2xl text-xs leading-relaxed max-w-[85%] shadow-md border relative group",
               msg.role === "ai" 
-                ? "bg-[#18181b] border-white/5 text-neutral-300 rounded-tl-none hover:border-[#FF2E4D]/20 transition-colors" 
-                : "bg-gradient-to-br from-[#FF2E4D] to-[#d91b36] border-[#FF2E4D] text-white rounded-tr-none shadow-[0_2px_10px_rgba(255,46,77,0.2)]"
+                ? "bg-[#18181b] border-white/5 text-neutral-300 rounded-tl-none hover:border-[#52020e] transition-colors" 
+                : "bg-linear-to-br from-[#ff0000] to-[#910319] border-[#ff0000] text-white rounded-tr-none shadow-[0_2px_10px_rgba(255,46,77,0.2)]"
             )}>
               {msg.text}
             </div>
@@ -382,16 +382,16 @@ const CopilotPanel = ({
         {/* --- COOL PROCESSING STATE --- */}
         {isProcessing && (
            <div className="flex gap-3 animate-in fade-in duration-300">
-              <div className="w-8 h-8 rounded-full bg-[#FF2E4D]/10 border border-[#FF2E4D]/30 flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(255,46,77,0.2)]">
-                 <Loader2 className="w-4 h-4 text-[#FF2E4D] animate-spin" />
+              <div className="w-8 h-8 rounded-full bg-electric-red/10 border border-electric-red/30 flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(255,46,77,0.2)]">
+                 <Loader2 className="w-4 h-4 text-[#ff0000] animate-spin" />
               </div>
               <div className="p-3.5 rounded-2xl rounded-tl-none bg-[#111] border border-white/5 flex flex-col gap-2 min-w-[160px] shadow-lg">
-                 <span className="text-[10px] font-bold text-[#FF2E4D] uppercase tracking-widest flex items-center gap-1.5 animate-pulse">
+                 <span className="text-[10px] font-bold text-[#ff0000] uppercase tracking-widest flex items-center gap-1.5 animate-pulse">
                     <Sparkles className="w-3 h-3" /> Thinking...
                  </span>
                  {/* Shimmer Effect Bar */}
                  <div className="h-1.5 w-full bg-neutral-800 rounded-full overflow-hidden relative">
-                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#FF2E4D] to-transparent w-1/2 animate-[shimmer_1.5s_infinite] translate-x-[-100%]" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#ff0000] to-transparent w-1/2 animate-[shimmer_1.5s_infinite] translate-x-[-100%]" />
                  </div>
               </div>
            </div>
@@ -408,13 +408,13 @@ const CopilotPanel = ({
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleSend()}
                     disabled={isProcessing}
-                    className="w-full bg-[#141414] border border-white/10 rounded-xl px-4 py-4 pr-12 text-xs text-white focus:outline-none focus:border-[#FF2E4D] focus:ring-1 focus:ring-[#FF2E4D]/50 placeholder:text-neutral-600 transition-all shadow-inner"
+                    className="w-full bg-[#141414] border border-white/10 rounded-xl px-4 py-4 pr-12 text-xs text-white focus:outline-none focus:border-[#ff0000] focus:ring-1 focus:ring-[#FF2E4D]/50 placeholder:text-neutral-600 transition-all shadow-inner"
                     placeholder={selectedClip ? `Ask AI to edit this clip...` : "Select a clip to start..."}
                 />
                 <button 
                     onClick={handleSend}
                     disabled={isProcessing || !input.trim()}
-                    className="absolute right-2 top-2 p-2 rounded-lg bg-[#FF2E4D] hover:bg-[#ff1f40] disabled:bg-transparent disabled:text-neutral-700 text-white transition-all shadow-lg shadow-[#FF2E4D]/20 hover:scale-105 active:scale-95"
+                    className="absolute right-2 top-2 p-2 rounded-lg bg-[#ff0000] hover:bg-[#ff0000] disabled:bg-transparent disabled:text-neutral-700 text-white transition-all shadow-lg shadow-[#FF2E4D]/20 hover:scale-105 active:scale-95"
                 >
                     <Send className="w-3.5 h-3.5" />
                 </button>
@@ -426,7 +426,7 @@ const CopilotPanel = ({
                     {/* Ripple Effects when Recording */}
                     {isRecording && (
                         <>
-                            <div className="absolute inset-0 rounded-full border border-[#FF2E4D] animate-[ping_1.5s_cubic-bezier(0,0,0.2,1)_infinite] opacity-50" />
+                            <div className="absolute inset-0 rounded-full border border-[#ff0000] animate-[ping_1.5s_cubic-bezier(0,0,0.2,1)_infinite] opacity-50" />
                             <div className="absolute inset-[-8px] rounded-full border border-[#FF2E4D]/50 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite] opacity-30" />
                             <div className="absolute inset-[-16px] rounded-full bg-[#FF2E4D]/5 animate-pulse" />
                         </>
@@ -438,7 +438,7 @@ const CopilotPanel = ({
                             "w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 relative z-10 border-4",
                             isRecording 
                                 ? "bg-[#FF2E4D] border-[#FF2E4D]/30 shadow-[0_0_40px_rgba(255,46,77,0.6)] scale-110" 
-                                : "bg-[#141414] border-white/10 hover:border-[#FF2E4D] hover:text-[#FF2E4D] text-neutral-500 shadow-xl hover:shadow-[0_0_20px_rgba(255,46,77,0.15)]"
+                                : "bg-[#141414] border-white/10 hover:border-[#ff0000] hover:text-[#ff0000] text-neutral-500 shadow-xl hover:shadow-[0_0_20px_rgba(255,46,77,0.15)]"
                         )}
                     >
                         {isRecording ? (
@@ -454,7 +454,7 @@ const CopilotPanel = ({
                 </div>
                 
                 <div className="flex flex-col items-center gap-1">
-                    <p className={cn("text-[10px] uppercase font-bold tracking-[0.25em]", isRecording ? "text-[#FF2E4D] animate-pulse" : "text-neutral-500")}>
+                    <p className={cn("text-[10px] uppercase font-bold tracking-[0.25em]", isRecording ? "text-[#ff0000] animate-pulse" : "text-neutral-500")}>
                         {isRecording ? "Listening..." : "Tap to Speak"}
                     </p>
                     {isRecording && <p className="text-[9px] text-neutral-600 font-mono">REC 00:0{Math.floor(Math.random()*9)}</p>}
@@ -501,7 +501,7 @@ const MagicAssetsPanel = () => {
         <div className="absolute top-0 right-0 w-32 h-32 bg-[#FF2E4D]/10 blur-[60px] rounded-full pointer-events-none" />
         
         <h3 className="text-[10px] font-bold text-neutral-400 mb-4 uppercase tracking-widest flex items-center gap-2">
-            <Wand2 className="w-3.5 h-3.5 text-[#FF2E4D]" /> AI Sound Generator
+            <Wand2 className="w-3.5 h-3.5 text-[#ff0000]" /> AI Sound Generator
         </h3>
         
         <div className="relative group">
@@ -516,7 +516,7 @@ const MagicAssetsPanel = () => {
           <button 
              onClick={handleGenerate}
              disabled={isGenerating || !prompt.trim()}
-             className="absolute right-2 top-2 p-1.5 rounded-lg bg-[#FF2E4D] hover:bg-[#ff1f40] disabled:bg-transparent disabled:text-neutral-600 text-white transition-all shadow-lg shadow-[#FF2E4D]/20"
+             className="absolute right-2 top-2 p-1.5 rounded-lg bg-[#f70025] hover:bg-[#ff0026] disabled:bg-transparent disabled:text-neutral-600 text-white transition-all shadow-lg shadow-[#FF2E4D]/20"
           >
              {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
           </button>
@@ -539,14 +539,14 @@ const MagicAssetsPanel = () => {
                    onDragStart={(e) => handleDragStart(e, file)}
                    className="flex items-center gap-3 p-3 bg-[#141414]/50 border border-white/5 rounded-xl hover:border-[#FF2E4D]/40 hover:bg-[#141414] cursor-grab active:cursor-grabbing group transition-all"
                 >
-                    <div className="w-9 h-9 rounded-full bg-[#222] flex items-center justify-center shrink-0 group-hover:bg-[#FF2E4D] group-hover:text-white transition-all duration-300 text-neutral-500 shadow-md">
+                    <div className="w-9 h-9 rounded-full bg-[#222] flex items-center justify-center shrink-0 group-hover:bg-[#ff0026] group-hover:text-white transition-all duration-300 text-neutral-500 shadow-md">
                         <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
                     </div>
                     <div className="flex-1 min-w-0">
                         <p className="text-[11px] font-bold text-neutral-300 group-hover:text-white truncate transition-colors">{file.name}</p>
                         <div className="flex items-center gap-2 mt-1">
                             <div className="h-0.5 flex-1 bg-neutral-800 rounded-full overflow-hidden">
-                                <div className="h-full bg-neutral-600 w-1/3 group-hover:bg-[#FF2E4D] transition-colors" />
+                                <div className="h-full bg-neutral-600 w-1/3 group-hover:bg-[#ff052b] transition-colors" />
                             </div>
                             <p className="text-[9px] text-neutral-600 font-mono">{file.duration.toFixed(1)}s</p>
                         </div>
@@ -590,7 +590,7 @@ const SubtitlesPanel = ({ selectedClip }: { selectedClip?: Clip | null }) => {
           <button 
              onClick={handleGenerate}
              disabled={isGenerating || !selectedClip}
-             className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[#FF2E4D] to-[#ff1f40] text-white font-bold text-xs uppercase tracking-wide transition-all flex items-center justify-center gap-2 disabled:from-[#222] disabled:to-[#222] disabled:text-neutral-500 disabled:cursor-not-allowed shadow-lg shadow-[#FF2E4D]/20 disabled:shadow-none hover:scale-[1.02] active:scale-[0.98] hover:shadow-[#FF2E4D]/40"
+             className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[#ff042a] to-[#e20627] text-white font-bold text-xs uppercase tracking-wide transition-all flex items-center justify-center gap-2 disabled:from-[#222] disabled:to-[#222] disabled:text-neutral-500 disabled:cursor-not-allowed shadow-lg shadow-[#FF2E4D]/20 disabled:shadow-none hover:scale-[1.02] active:scale-[0.98] hover:shadow-[#FF2E4D]/40"
           >
              {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Captions className="w-4 h-4" />}
              {isGenerating ? "Transcribing..." : "Generate Captions"}
@@ -614,7 +614,7 @@ const SubtitlesPanel = ({ selectedClip }: { selectedClip?: Clip | null }) => {
                     className="p-3 bg-[#141414] border border-white/5 rounded-lg hover:border-[#FF2E4D]/40 cursor-grab active:cursor-grabbing group transition-all"
                  >
                      <div className="flex justify-between items-center mb-1.5">
-                        <span className="text-[9px] font-mono text-[#FF2E4D] bg-[#FF2E4D]/10 px-1.5 py-0.5 rounded border border-[#FF2E4D]/20">
+                        <span className="text-[9px] font-mono text-[#e50526] bg-[#FF2E4D]/10 px-1.5 py-0.5 rounded border border-[#FF2E4D]/20">
                             {sub.start.toFixed(1)}s - {sub.end.toFixed(1)}s
                         </span>
                         <Type className="w-3 h-3 text-neutral-600 group-hover:text-white transition-colors" />
@@ -659,8 +659,8 @@ export default function ToolsPanel({ activeTool, onMediaSelect, selectedClip, on
       <div className="h-14 border-b border-white/5 flex items-center justify-between px-6 bg-[#09090b]">
         <h2 className="text-neutral-300 text-[10px] uppercase tracking-[0.2em] font-bold flex items-center gap-3">
             <div className="relative">
-                <div className="w-2 h-2 bg-[#FF2E4D] rounded-full relative z-10" />
-                <div className="absolute inset-0 bg-[#FF2E4D] blur-[4px] opacity-80" />
+                <div className="w-2 h-2 bg-[#db0727] rounded-full relative z-10" />
+                <div className="absolute inset-0 bg-[#ef0a2c] blur-[4px] opacity-80" />
             </div>
             {titles[activeTool] || "Tool"}
         </h2>

@@ -290,7 +290,7 @@ export default function Timeline({
       {/* --- TOOLBAR --- */}
       <div className="h-10.7 border-b border-white/6 flex items-center justify-between px-4 bg-[#141414] shrink-0 z-40 relative">
          <div className="flex gap-3 items-center">
-             <div className="flex bg-[#111] p-0.5 rounded-lg ">
+             <div className="flex bg-[#141414] p-0.5 rounded-lg ">
                 <button 
                   onClick={handleSplit} 
                   disabled={!selectedClipId} 
@@ -318,13 +318,13 @@ export default function Timeline({
              </div>
          </div>
          
-         <div className="absolute left-1/2 -translate-x-1/2 font-mono text-xs font-semibold text-[#ff0000] tracking-widest bg-[#000000] px-4 py-1.5 rounded-full border border-electric-red/20 shadow-[0_0_20px_rgba(255,46,77,0.1)]">
+         <div className="absolute left-1/2 -translate-x-1/2 font-mono text-xs font-semibold text-[#e71111] tracking-widest bg-[#141414] px-4 py-1.5 rounded-full border border-[#141414]">
             {new Date(currentTime * 1000).toISOString().substr(11, 8)}
             <span className="text-neutral-500 text-[10px] ml-1">{(currentTime % 1).toFixed(2).substring(1)}</span>
          </div>
 
          <div className="flex items-center gap-4">
-             <div className="flex items-center gap-2 bg-[#111] px-2 py-1 rounded-lg border border-white/6">
+             <div className="flex items-center gap-2 bg-[#141414] px-2 py-1 rounded-lg border border-[#181818]">
                 <button onClick={() => setZoom(z => Math.max(z - 10, 2))} className="p-1 hover:text-white transition-colors text-neutral-500"><ZoomOut className="w-3.5 h-3.5" /></button>
                 <div className="w-20 h-1 bg-neutral-800 rounded-full overflow-hidden relative">
                     <div className="absolute left-0 top-0 bottom-0 bg-[#ff0000] shadow-[0_0_10px_#FF2E4D]" style={{ width: `${Math.min(zoom/3, 100)}%` }} />
