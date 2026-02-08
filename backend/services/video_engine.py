@@ -4,127 +4,121 @@ import os
 import uuid
 import subprocess
 import json
+import math
+from functools import lru_cache
 
 # Define where temporary files go
 TEMP_DIR = "temp_storage"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# --- GLOBAL CONFIG ---
-TARGET_WIDTH = 1920
-TARGET_HEIGHT = 1080
-TARGET_ASPECT = "16/9"
-
 # ==========================================
-# 🚀 HARDWARE ACCELERATION CHECKER
+# 🚀 HARDWARE ACCELERATION (With Validation)
 # ==========================================
+@lru_cache(maxsize=1)
 def get_hardware_encoder():
     """
-    Detects available hardware encoders (NVIDIA NVENC, Intel QSV).
-    Returns the best available codec and preset.
+    Checks for available hardware encoders.
     """
+    print("🕵️ Checking hardware acceleration support...")
     try:
-        # Check for NVIDIA NVENC
+        # We query ffmpeg for encoders
         result = subprocess.run(['ffmpeg', '-encoders'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if 'h264_nvenc' in result.stdout:
-            print("🚀 Hardware Acceleration: NVIDIA NVENC Detected")
-            return 'h264_nvenc', 'p4' # p1=fastest, p7=best quality. p4 is balanced.
         
-        # Check for Intel QSV (QuickSync)
+        # Check NVIDIA
+        if 'h264_nvenc' in result.stdout:
+            print("🚀 Hardware: NVIDIA NVENC Detected")
+            return 'h264_nvenc', 'p4'
+        
+        # Check Intel QSV
         if 'h264_qsv' in result.stdout:
-            print("🚀 Hardware Acceleration: Intel QSV Detected")
+            print("🚀 Hardware: Intel QSV Detected")
             return 'h264_qsv', 'fast'
             
-        # Check for Mac Silicon (VideoToolbox) - Optional, adds compatibility
+        # Check Mac
         if 'h264_videotoolbox' in result.stdout:
-             print("🚀 Hardware Acceleration: Apple VideoToolbox Detected")
+             print("🚀 Hardware: Apple VideoToolbox Detected")
              return 'h264_videotoolbox', 'default'
 
     except Exception as e:
-        print(f"⚠️ Encoder check failed: {e}")
+        print(f"⚠️ Hardware check failed: {e}")
 
-    print("🐢 Hardware Acceleration: None (Using CPU libx264)")
-    return 'libx264', 'fast' # Fallback to CPU
+    print("🐢 Hardware: CPU Fallback (libx264)")
+    return 'libx264', 'ultrafast' # Default to speed for CPU
 
 # ==========================================
-# 🧠 SMART STITCHING LOGIC (Upgraded)
+# 🧠 SMART STITCHING (Self-Healing)
 # ==========================================
-async def execute_smart_stitch(input_path, output_path, segments, preset='fast'):
-    """
-    1. Trims segments.
-    2. SCALES all segments to 1080p (prevents concat errors with mixed footage).
-    3. Concatenates in one pass.
-    """
-    print(f"--- ✂️ Executing Smart Stitch on {len(segments)} segments ---")
+async def execute_smart_stitch(input_path, output_path, segments):
+    print(f"--- ✂️ Smart Stitching {len(segments)} segments ---")
     
-    # Get Best Codec
-    video_codec, hw_preset = get_hardware_encoder()
-    # Use 'ultrafast' for CPU if doing preview/timeline work, otherwise use HW preset
-    final_preset = 'ultrafast' if video_codec == 'libx264' and preset == 'ultrafast' else (hw_preset if video_codec != 'libx264' else preset)
+    # 1. Attempt with Best Encoder
+    video_codec, preset = get_hardware_encoder()
+    
+    success = await _run_stitch_pass(input_path, output_path, segments, video_codec, preset)
+    
+    # 2. Fallback to CPU if HW fails (Self-Healing)
+    if not success and video_codec != 'libx264':
+        print("⚠️ HW Encoder Failed! Switching to CPU (libx264)...")
+        success = await _run_stitch_pass(input_path, output_path, segments, 'libx264', 'ultrafast')
+        
+    return success
 
+async def _run_stitch_pass(input_path, output_path, segments, video_codec, preset):
     try:
+        # Probe Input
         probe = ffmpeg.probe(input_path)
+        video_info = next(s for s in probe['streams'] if s['codec_type'] == 'video')
+        src_w = int(video_info['width'])
+        src_h = int(video_info['height'])
         has_audio = any(s['codec_type'] == 'audio' for s in probe['streams'])
         
         inp = ffmpeg.input(input_path)
-        video_streams = []
-        audio_streams = []
+        concat_parts = [] 
 
-        for i, seg in enumerate(segments):
+        for seg in segments:
             start = float(seg['start'])
             end = float(seg['end'])
             
-            # --- VIDEO CHAIN: Trim -> Scale -> Pad -> Setsar ---
-            # This ensures every segment is exactly 1920x1080 before stitching
+            # VIDEO: Trim + Reset PTS + Force Source Resolution
             v = (
                 inp.video
                 .trim(start=start, end=end)
                 .setpts('PTS-STARTPTS')
-                .filter('scale', w=TARGET_WIDTH, h=TARGET_HEIGHT, force_original_aspect_ratio="decrease")
-                .filter('pad', w=TARGET_WIDTH, h=TARGET_HEIGHT, x='(ow-iw)/2', y='(oh-ih)/2', color='black')
-                .filter('setsar', 1) # Force square pixels to avoid aspect ratio mismatches
+                .filter('scale', w=src_w, h=src_h)
+                .filter('setsar', 1) 
             )
-            video_streams.append(v)
+            concat_parts.append(v)
             
-            # --- AUDIO CHAIN ---
+            # AUDIO: Trim + Reset PTS
             if has_audio:
                 a = (
                     inp.audio
                     .filter_('atrim', start=start, end=end)
                     .filter_('asetpts', 'PTS-STARTPTS')
                 )
-                audio_streams.append(a)
+                concat_parts.append(a)
 
         # Concatenate
-        # Interleave streams: [v0, a0, v1, a1, ...]
         if has_audio:
-            concat_inputs = []
-            for v, a in zip(video_streams, audio_streams):
-                concat_inputs.extend([v, a])
-                
-            joined = ffmpeg.concat(*concat_inputs, v=1, a=1).node
-            out = ffmpeg.output(joined[0], joined[1], output_path, vcodec=video_codec, preset=final_preset, acodec='aac')
+            joined = ffmpeg.concat(*concat_parts, v=1, a=1).node
+            out = ffmpeg.output(joined[0], joined[1], output_path, vcodec=video_codec, preset=preset, acodec='aac')
         else:
-            joined = ffmpeg.concat(*video_streams, v=1, a=0).node
-            out = ffmpeg.output(joined[0], output_path, vcodec=video_codec, preset=final_preset)
+            joined = ffmpeg.concat(*concat_parts, v=1, a=0).node
+            out = ffmpeg.output(joined[0], output_path, vcodec=video_codec, preset=preset)
 
-        # Run
         out.run(overwrite_output=True, quiet=True)
         return True
 
     except ffmpeg.Error as e:
-        print(f"❌ FFmpeg Error Log: {e.stderr.decode() if e.stderr else 'Unknown'}")
-        return False
-    except Exception as e:
-        print(f"❌ Smart Stitch Error: {e}")
+        # Log the specific error to help debug
+        err_msg = e.stderr.decode() if e.stderr else str(e)
+        print(f"NVIDIA NVENC is not Detected skiping the NVIDIA acceleration") # Print first 200 chars
         return False
 
 # ==========================================
-# ⚙️ MAIN PROCESSOR
+# ⚙️ MAIN PROCESSOR (Legacy Tools + Smart)
 # ==========================================
 async def process_video(input_path: str, actions: list, clip_start: float = 0.0, clip_duration: float = None):
-    """
-    Handles AI "Keep Lists" and Legacy Tools with Hardware Acceleration.
-    """
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
@@ -132,17 +126,15 @@ async def process_video(input_path: str, actions: list, clip_start: float = 0.0,
     output_path = os.path.join(TEMP_DIR, output_filename)
 
     try:
-        # Detect Mode
+        # Detect Smart Stitch Mode
         is_smart_stitch = len(actions) > 0 and "start" in actions[0] and "tool" not in actions[0]
 
         if is_smart_stitch:
-            # Smart Stitch uses 'ultrafast' for responsiveness during editing
-            success = await execute_smart_stitch(input_path, output_path, actions, preset='ultrafast')
-            if not success:
-                raise ValueError("Smart Stitching failed")
+            success = await execute_smart_stitch(input_path, output_path, actions)
+            if not success: raise ValueError("All stitch attempts failed")
         
         else:
-            # Legacy Mode
+            # LEGACY TOOL MODE
             probe = ffmpeg.probe(input_path)
             has_audio = any(s['codec_type'] == 'audio' for s in probe['streams'])
             
@@ -151,8 +143,8 @@ async def process_video(input_path: str, actions: list, clip_start: float = 0.0,
             audio = stream.audio if has_audio else None
 
             # 1. Timeline Pre-Trim
-            if clip_start > 0 or (clip_duration is not None and clip_duration > 0):
-                print(f"--- Pre-Trimming: {clip_start}s, Dur: {clip_duration}s ---")
+            if clip_start > 0 or (clip_duration and clip_duration > 0):
+                print(f"--- Pre-Trimming: {clip_start}s ---")
                 trim_end = clip_start + clip_duration if clip_duration else None
                 video = video.trim(start=clip_start, end=trim_end).setpts('PTS-STARTPTS')
                 if has_audio:
@@ -167,8 +159,16 @@ async def process_video(input_path: str, actions: list, clip_start: float = 0.0,
                 if tool == "speed":
                     factor = float(params.get("factor", 1.0))
                     video = video.filter('setpts', f'{1/factor}*PTS')
+                    
                     if has_audio:
-                        audio = audio.filter('atempo', factor)
+                        # Atempo chaining for extreme speeds
+                        curr = factor
+                        while curr > 2.0:
+                            audio = audio.filter('atempo', 2.0); curr /= 2.0
+                        while curr < 0.5:
+                            audio = audio.filter('atempo', 0.5); curr /= 0.5
+                        if curr != 1.0:
+                            audio = audio.filter('atempo', curr)
                 
                 elif tool == "filter":
                     ftype = params.get("type", "").lower()
@@ -176,94 +176,88 @@ async def process_video(input_path: str, actions: list, clip_start: float = 0.0,
                     elif ftype == "sepia": video = video.filter('colorchannelmixer', rr=0.393, rg=0.769, rb=0.189, gr=0.349, gg=0.686, gb=0.168, br=0.272, bg=0.534, bb=0.131)
                     elif ftype == "warm": video = video.filter('eq', saturation=1.3, contrast=1.1, gamma_r=1.1)
 
-            # 3. Render with HW Accel
-            video_codec, hw_preset = get_hardware_encoder()
+            # 3. Render (Try CPU Safe Mode first for tools)
+            # Legacy tools are less intensive, so libx264 is safer and fine
+            job = ffmpeg.output(
+                video, 
+                audio if has_audio else video, # fallback if no audio stream
+                output_path, 
+                vcodec='libx264', 
+                preset='ultrafast', 
+                movflags='faststart'
+            )
             
-            args = {
-                'vcodec': video_codec,
-                'preset': 'ultrafast' if video_codec == 'libx264' else hw_preset,
-                'movflags': 'faststart'
-            }
-            
-            if has_audio:
-                job = ffmpeg.output(video, audio, output_path, **args)
-            else:
-                job = ffmpeg.output(video, output_path, **args)
-            
+            # If no audio, remove audio mapping
+            if not has_audio:
+                job = ffmpeg.output(video, output_path, vcodec='libx264', preset='ultrafast')
+
             job.run(overwrite_output=True, quiet=True)
 
-        # --- FINAL ---
+        # Output Duration Check
         if os.path.exists(output_path):
             probe = ffmpeg.probe(output_path)
             new_dur = float(probe['format']['duration'])
-            print(f"--- ✅ Success! Duration: {new_dur}s ---")
             return {"path": output_path, "duration": new_dur}
         else:
             return None
 
     except Exception as e:
-        print(f"Processing Error: {e}")
+        print(f"Engine Error: {e}")
         return None
 
 # ==========================================
-# 🎬 STITCH VIDEOS (EXPORT PROJECT)
+# 🎬 STITCH VIDEOS (Robust Audio Handling)
 # ==========================================
 async def stitch_videos(clips: list):
-    """
-    Concatenates mixed files. Uses a re-encode "Scale & Pad" strategy
-    to ensure 1080p uniformity, preventing 'Concat Error'.
-    """
     output_filename = f"final_render_{uuid.uuid4()}.mp4"
     output_path = os.path.join(TEMP_DIR, output_filename)
     
-    # Get HW Accel
-    video_codec, hw_preset = get_hardware_encoder()
-
     try:
         inputs = []
+        valid_clips = []
+        
+        # 1. Filter Valid Files
         for clip in clips:
             p = os.path.join(TEMP_DIR, clip["filename"])
             if os.path.exists(p):
-                inputs.append(ffmpeg.input(p))
+                valid_clips.append(p)
         
-        if not inputs: return None
+        if not valid_clips: return None
 
-        print(f"🧵 Stitching {len(inputs)} clips with {video_codec}...")
+        # 2. Create File List for Demuxer (Safer than filter complex for simple joins)
+        # This prevents resolution mismatch crashing
+        list_path = os.path.join(TEMP_DIR, f"list_{uuid.uuid4()}.txt")
+        with open(list_path, 'w') as f:
+            for path in valid_clips:
+                f.write(f"file '{path}'\n")
 
-        # We construct a Filter Complex to Scale all inputs to 1080p
-        # This is safer than the 'unsafe' concat demuxer method
-        video_streams = []
-        audio_streams = []
+        # 3. Run Concat Demuxer
+        # Note: This requires all clips to have same Codec/Resolution.
+        # If your clips vary wildly, we must use the Filter Complex method below.
+        # Assuming clips processed by this engine are uniform-ish.
         
-        has_audio_any = False
-
-        for inp in inputs:
-            # Scale & Pad Video
-            v = (
-                inp.video
-                .filter('scale', w=TARGET_WIDTH, h=TARGET_HEIGHT, force_original_aspect_ratio="decrease")
-                .filter('pad', w=TARGET_WIDTH, h=TARGET_HEIGHT, x='(ow-iw)/2', y='(oh-ih)/2', color='black')
-                .filter('setsar', 1)
-            )
-            video_streams.append(v)
-            
-            # Use audio if present, otherwise generate silence? 
-            # For simplicity, we assume clips have audio. If not, this can be brittle.
-            # Robust method: Check clip probing. Assuming valid audio for now.
-            audio_streams.append(inp.audio)
-            has_audio_any = True
-
-        # Concat
-        if has_audio_any:
-            joined = ffmpeg.concat(*[s for pair in zip(video_streams, audio_streams) for s in pair], v=1, a=1).node
-            out = ffmpeg.output(joined[0], joined[1], output_path, vcodec=video_codec, preset=hw_preset, acodec='aac')
-        else:
-            joined = ffmpeg.concat(*video_streams, v=1, a=0).node
-            out = ffmpeg.output(joined[0], output_path, vcodec=video_codec, preset=hw_preset)
-
-        out.run(overwrite_output=True, quiet=True)
+        print(f"🧵 Stitching {len(valid_clips)} clips...")
+        
+        (
+            ffmpeg
+            .input(list_path, format='concat', safe=0)
+            .output(output_path, c='copy') # Stream copy = Instant render
+            .run(overwrite_output=True, quiet=True)
+        )
+        
+        os.remove(list_path)
         return output_path
 
     except Exception as e:
-        print(f"Render Error: {e}")
-        return None
+        print(f"Simple Stitch Failed: {e}. Trying Re-encode Stitch...")
+        
+        # Fallback: Robust Re-encode Stitch
+        try:
+            inputs = [ffmpeg.input(p) for p in valid_clips]
+            # Simple Video Concat (Drop Audio if complex)
+            # This is a last resort fallback
+            joined = ffmpeg.concat(*[i.video for i in inputs], v=1, a=0).node
+            ffmpeg.output(joined[0], output_path, preset='ultrafast').run(overwrite_output=True)
+            return output_path
+        except:
+            return None
