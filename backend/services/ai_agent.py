@@ -3,159 +3,200 @@
 import os
 import json
 import asyncio
+import time
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
 
 # Load env variables
 load_dotenv(override=True)
 
 API_KEY = os.getenv("GEMINI_API_KEY")
+TEMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp_storage")
 
 if not API_KEY:
-    raise RuntimeError("GEMINI_API_KEY not found in .env")
+    raise RuntimeError("❌ GEMINI_API_KEY not found in .env")
 
 # Initialize Gemini client
-client = genai.Client(api_key=API_KEY)
+genai.configure(api_key=API_KEY)
 
-# Using the fastest stable model
-MODEL_NAME = "gemini-3-pro-preview" 
+# --- CONFIGURATION ---
+PRIMARY_MODEL = "gemini-3-pro-preview"  # Fast, multimodal, latest
+FALLBACK_MODEL = "gemini-1.5-pro"       # Stable, high reasoning
 
+# --- THE "ANTI-HALLUCINATION" SYSTEM PROMPT ---
 SYSTEM_PROMPT = """
-You are **VOXEDIT**, an advanced AI video editing assistant. 
-Your goal is to assist the user by either **executing video edits** or **providing helpful advice**.
+You are **VOXEDIT AGENT**, an autonomous AI video editor.
+Your goal is to translate natural language commands into precise, executable FFmpeg edit plans.
 
-### OUTPUT FORMAT (STRICT JSON ONLY):
-You must ALWAYS respond with this JSON structure:
+### INPUT DATA:
+1. **User Command**: A specific editing instruction.
+2. **Video Content**: Visuals and Audio from the attached file.
+
+### 🧠 REASONING PROTOCOL (Perform this internally):
+1. **Scan**: Watch the video from 00:00 to the end.
+2. **Identify**: Locate the *exact* timestamps of events mentioned by the user (e.g., "silence", "laughter", "red car").
+3. **Verify**: Double-check that these events actually happen. Do not invent events.
+4. **Plan**: Calculate the `start` and `end` timestamps for the segments to KEEP.
+
+### 🛡️ CRITICAL RULES (Anti-Hallucination):
+1. **"Keep" Strategy**: You define what stays. Everything else is deleted.
+2. **Silence Removal**: If asked to remove silence, identify disjointed speech segments. 
+   - *Example*: User speaks 0-5s, silence 5-10s, speaks 10-15s. -> Keep [0,5] and [10,15].
+3. **Impossible Requests**: If the user asks for something not in the video (e.g., "Show the dinosaur" but there is no dinosaur), return an empty segment list and explain why.
+4. **Precision**: Use floats for timestamps (e.g., 12.45). Start must always be less than End.
+5. **Context**: If the command is vague (e.g., "Fix it"), assume standard cleanup (remove long silences, improve contrast).
+
+### OUTPUT FORMAT (STRICT JSON):
+Return ONLY this JSON object. No markdown.
 {
-  "actions": [ ... list of tools ... ], 
-  "explanation": " ... text response to the user ... "
-}
-
----
-
-### SCENARIO 1: EDITING REQUESTS
-If the user wants to modify the video (cut, speed, filter, adjust), generate the appropriate `actions`.
-
-**AVAILABLE TOOLS:**
-1. **"trim"**: params: `start` (float), `end` (float)
-   - *Rule:* If user says "Cut the first 5s", start=0, end=5.
-2. **"speed"**: params: `factor` (float)
-   - *Rule:* 0.5 = Slow motion, 2.0 = Fast forward.
-3. **"filter"**: params: `type` (string)
-   - *Types:* "grayscale", "sepia", "invert", "warm".
-4. **"adjust"**: params: `contrast` (0.0-2.0), `brightness` (-1.0 to 1.0), `saturation` (0.0-3.0).
-5. **"audio_cleanup"**: params: none. (Removes silence/noise).
-
-**Example (Edit):**
-User: "Make it black and white and speed it up."
-Output:
-{
-  "actions": [
-    { "tool": "filter", "params": { "type": "grayscale" } },
-    { "tool": "speed", "params": { "factor": 1.5 } }
+  "explanation": "I found 3 segments where you were speaking and removed the long pauses.",
+  "segments_to_keep": [
+    { "start": 0.0, "end": 4.5, "label": "Intro speech" },
+    { "start": 8.2, "end": 15.0, "label": "Main point" }
   ],
-  "explanation": "I've applied a grayscale filter and increased the playback speed to 1.5x."
+  "global_effects": {
+    "speed": 1.0, 
+    "filter": "none" // options: "none", "grayscale", "sepia", "warm", "cool", "vintage"
+  }
 }
-
----
-
-### SCENARIO 2: CONVERSATIONAL / ADVICE
-If the user asks a question, says hello, or asks for help *without* a specific edit command, return **empty actions** `[]` and answer them in the `explanation`.
-
-**Example (Chat):**
-User: "How do I make my video look vintage?"
-Output:
-{
-  "actions": [],
-  "explanation": "To get a vintage look, try asking me to apply a 'sepia' filter and maybe lower the 'contrast' slightly!"
-}
-
-**Example (Greeting):**
-User: "Hi there!"
-Output:
-{
-  "actions": [],
-  "explanation": "Hello! I'm ready to edit. Select a clip on the timeline and tell me what to do!"
-}
-
----
-
-### CRITICAL RULES:
-1. **JSON ONLY.** No markdown (```json). No plain text.
-2. If the user command is vague (e.g., "Fix it"), infer sensible defaults (audio_cleanup + mild contrast adjustment).
-3. Be concise and professional.
 """
+
+# =========================
+# HELPER: VALIDATE SEGMENTS
+# =========================
+def sanitize_plan(plan):
+    """
+    Cleans up the AI's output to prevent FFmpeg crashes.
+    """
+    valid_segments = []
+    if "segments_to_keep" in plan:
+        for seg in plan["segments_to_keep"]:
+            # Rule 1: Start must be < End
+            if seg.get("end", 0) <= seg.get("start", 0):
+                continue # Skip invalid segments
+            
+            # Rule 2: Start must be positive
+            if seg.get("start", 0) < 0:
+                seg["start"] = 0.0
+            
+            valid_segments.append(seg)
+    
+    plan["segments_to_keep"] = valid_segments
+    return plan
+
+# =========================
+# HELPER: UPLOAD VIDEO
+# =========================
+def upload_video_to_gemini(filename):
+    file_path = os.path.join(TEMP_DIR, filename)
+    
+    if not os.path.exists(file_path):
+        print(f"❌ [AI AGENT] File not found locally: {file_path}")
+        return None
+
+    print(f"--- 📤 [AI AGENT] Uploading {filename} to Gemini... ---")
+    
+    # 1. Upload
+    try:
+        video_file = genai.upload_file(path=file_path)
+    except Exception as e:
+        print(f"❌ [AI AGENT] Upload failed: {e}")
+        return None
+    
+    # 2. Poll state
+    print(f"--- ⏳ [AI AGENT] Processing Video (URI: {video_file.uri})... ---")
+    
+    # Timeout safety (max 60 seconds wait)
+    start_time = time.time()
+    while video_file.state.name == "PROCESSING":
+        if time.time() - start_time > 60:
+            raise TimeoutError("Gemini video processing timed out.")
+        time.sleep(2)
+        video_file = genai.get_file(video_file.name)
+        
+    if video_file.state.name == "FAILED":
+        raise ValueError(f"Gemini failed to process video: {video_file.state.name}")
+        
+    print(f"--- ✅ [AI AGENT] Video Ready. ---")
+    return video_file
 
 # =========================
 # CORE AI FUNCTION
 # =========================
-async def analyze_command(user_text: str):
-    try:
-        # Construct the full prompt
-        full_prompt = f"{SYSTEM_PROMPT}\n\nUSER COMMAND: {user_text}"
+async def analyze_command(user_text: str, video_filename: str = None):
+    # 1. Prepare Video
+    video_file = None
+    if video_filename:
+        try:
+            video_file = upload_video_to_gemini(video_filename)
+            if not video_file:
+                 return {"explanation": "Error: Video upload failed.", "segments_to_keep": []}
+        except Exception as e:
+             return {"explanation": f"Error during upload: {str(e)}", "segments_to_keep": []}
 
-        # Call Gemini 2.0
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=full_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.4, # Slightly higher temp for better conversation
+    # 2. Construct Request
+    prompt_parts = [SYSTEM_PROMPT, f"\nUSER COMMAND: {user_text}"]
+    if video_file:
+        prompt_parts.append(video_file)
+
+    # 3. Call Model (With Fallback Logic)
+    for model_name in [PRIMARY_MODEL, FALLBACK_MODEL]:
+        try:
+            print(f"--- 🧠 [AI AGENT] Reasoning with {model_name}... ---")
+            
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                generation_config={"response_mime_type": "application/json", "temperature": 0.2} 
+                # Low temp = more deterministic/accurate
             )
-        )
+            
+            response = model.generate_content(prompt_parts)
+            
+            # 4. Parsing & Cleanup
+            try:
+                plan = json.loads(response.text)
+                clean_plan = sanitize_plan(plan) # Validate timestamps
+                return clean_plan
+            
+            except json.JSONDecodeError:
+                # Handle accidental markdown wrapping
+                text = response.text.replace("```json", "").replace("```", "").strip()
+                plan = json.loads(text)
+                return sanitize_plan(plan)
 
-        if not response or not response.text:
-            raise RuntimeError("Empty AI response received.")
+        except (ResourceExhausted, ServiceUnavailable):
+            print(f"⚠️ [AI AGENT] {model_name} overloaded. Switching to fallback...")
+            continue # Try next model
+            
+        except Exception as e:
+            print(f"❌ [AI AGENT] Unexpected error: {str(e)}")
+            return {"explanation": f"AI Error: {str(e)}", "segments_to_keep": []}
 
-        # Clean response string (remove potential Markdown wrappers)
-        raw_text = response.text.strip()
-        if raw_text.startswith("```json"):
-            raw_text = raw_text[7:]
-        if raw_text.startswith("```"):
-            raw_text = raw_text[3:]
-        if raw_text.endswith("```"):
-            raw_text = raw_text[:-3]
-        
-        cleaned_json_text = raw_text.strip()
-
-        # Parse JSON
-        plan = json.loads(cleaned_json_text)
-        return plan
-
-    except json.JSONDecodeError:
-        print(f"JSON Error. Raw text was: {response.text if 'response' in locals() else 'N/A'}")
-        return {
-            "actions": [],
-            "explanation": "I understood your request, but I had trouble formatting the editing plan. Please try again."
-        }
-
-    except Exception as e:
-        print(f"AI Agent Error: {str(e)}")
-        return {
-            "actions": [],
-            "explanation": f"I encountered an error: {str(e)}"
-        }
-
+    return {"explanation": "AI Service unavailable after retries.", "segments_to_keep": []}
 
 # =========================
 # LOCAL TEST RUNNER
 # =========================
 if __name__ == "__main__":
     async def test():
-        # Test 1: Editing Command
-        print("--- TEST 1: EDITING ---")
-        cmd1 = "Cut the first 5 seconds and make it warm."
-        res1 = await analyze_command(cmd1)
-        print(f"User: {cmd1}")
-        print(f"AI: {res1['explanation']}")
-        print(f"Actions: {len(res1['actions'])}\n")
-
-        # Test 2: Conversation
-        print("--- TEST 2: CONVERSATION ---")
-        cmd2 = "What does the warm filter do?"
-        res2 = await analyze_command(cmd2)
-        print(f"User: {cmd2}")
-        print(f"AI: {res2['explanation']}")
-        print(f"Actions: {len(res2['actions'])}\n")
+        # Ensure 'checklist.mp4' is in 'backend/temp_storage/' 
+        test_video = "checklist.mp4" 
+        
+        print("\n\n=== 🧪 TESTING VOXEDIT PRO AGENT ===")
+        
+        # Test 1: Vague cleanup
+        cmd1 = "Clean up the audio and remove silence."
+        print(f"👉 Command: {cmd1}")
+        res1 = await analyze_command(cmd1, video_filename=test_video)
+        print(f"🤖 AI: {res1.get('explanation')}")
+        print(f"✂️ Segments: {len(res1.get('segments_to_keep', []))}\n")
+        
+        # Test 2: Specific visual query (Edge Case)
+        cmd2 = "Keep only the part where the red pen is visible."
+        print(f"👉 Command: {cmd2}")
+        res2 = await analyze_command(cmd2, video_filename=test_video)
+        print(f"🤖 AI: {res2.get('explanation')}")
+        print(f"✂️ Segments: {json.dumps(res2.get('segments_to_keep', []), indent=2)}")
 
     asyncio.run(test())

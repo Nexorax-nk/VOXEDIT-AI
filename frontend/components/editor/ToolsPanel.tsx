@@ -391,7 +391,7 @@ const CopilotPanel = ({
                  </span>
                  {/* Shimmer Effect Bar */}
                  <div className="h-1.5 w-full bg-neutral-800 rounded-full overflow-hidden relative">
-                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#ff0000] to-transparent w-1/2 animate-[shimmer_1.5s_infinite] translate-x-[-100%]" />
+                    <div className="absolute inset-0 bg-linear-to-r from-transparent via-[#ff0000] to-transparent w-1/2 animate-[shimmer_1.5s_infinite] translate-x-[-100%]" />
                  </div>
               </div>
            </div>

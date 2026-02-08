@@ -14,13 +14,13 @@ import ffmpeg # Needed for probing duration
 from services.ai_agent import analyze_command
 from services.video_engine import process_video, stitch_videos
 from services.voice_gen import generate_voice_reply 
-from services.sfx_gen import generate_sound_effect # <--- NEW: SFX Service
+from services.sfx_gen import generate_sound_effect
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"], 
+    allow_origins=["*"], # Allow all for dev convenience
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,17 +46,20 @@ async def edit_video(
     clip_start: float = Form(0.0),
     clip_duration: float = Form(None)
 ):
-    print(f"🎬 EDIT REQUEST: '{command}'")
+    print(f"🎬 EDIT REQUEST: '{command}' on file '{filename}'")
     input_path = os.path.join(UPLOAD_DIR, filename)
     if not os.path.exists(input_path):
         raise HTTPException(status_code=404, detail="File not found")
 
-    # A. Ask AI
-    ai_plan = await analyze_command(command)
-    actions = ai_plan.get("actions", [])
+    # A. Ask AI (Now sending the filename so Gemini can WATCH it!)
+    ai_plan = await analyze_command(command, video_filename=filename)
+    
+    # B. Compatibility Adapter (Handle both new and old AI formats)
+    # The new agent returns 'segments_to_keep', older might return 'actions'
+    actions = ai_plan.get("segments_to_keep", ai_plan.get("actions", []))
     explanation = ai_plan.get("explanation", "Processed successfully.")
     
-    # B. Handle Conversation (No Actions)
+    # C. Handle Conversation (No Actions)
     if not actions:
         print("   💬 Conversational response (no edits).")
         return {
@@ -68,9 +71,12 @@ async def edit_video(
             "actions": []
         }
 
-    # C. Run Engine (With Actions)
-    print("   ⚙️ executing actions...")
+    # D. Run Engine (With Actions)
+    print(f"   ⚙️ Executing {len(actions)} actions...")
+    
+    # Note: Ensure your process_video function supports the 'segments_to_keep' structure!
     result = await process_video(input_path, actions, clip_start, clip_duration)
+    
     if not result:
         raise HTTPException(status_code=500, detail="Processing failed")
 
@@ -120,9 +126,11 @@ async def voice_command(
         if os.path.exists(temp_audio_path): os.remove(temp_audio_path)
         if os.path.exists(wav_path): os.remove(wav_path)
 
-        # C. Ask AI
-        ai_plan = await analyze_command(text_command)
-        actions = ai_plan.get("actions", [])
+        # C. Ask AI (Multimodal passing video_filename!)
+        ai_plan = await analyze_command(text_command, video_filename=filename)
+        
+        # Compatibility Adapter
+        actions = ai_plan.get("segments_to_keep", ai_plan.get("actions", []))
         explanation = ai_plan.get("explanation", "Processed successfully.")
 
         # --- D. GENERATE VOICE REPLY ---
@@ -189,7 +197,7 @@ async def render_project(
         print(f"Render API Error: {e}")
         return {"status": "error", "message": str(e)}
 
-# --- 5. NEW: MAGIC ASSETS (SFX) ENDPOINT ---
+# --- 5. MAGIC ASSETS (SFX) ENDPOINT ---
 @app.post("/generate-sfx")
 async def generate_sfx_endpoint(
     text: str = Form(...),
