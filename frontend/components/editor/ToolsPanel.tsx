@@ -101,7 +101,7 @@ const MediaPanel = ({
             "w-full py-6 rounded-xl border border-dashed flex flex-col items-center justify-center gap-2 transition-all group relative overflow-hidden",
             isUploading 
               ? "border-white/10 opacity-50 cursor-wait bg-white/5" 
-              : "border-white/10 hover:border-[#ff0000] hover:bg-electric-red/5 active:scale-[0.99]"
+              : "border-white/10 hover:border-[#ff0000] hover:bg-[#ff0000]/5 active:scale-[0.99]"
           )}
         >
           {isUploading ? (
@@ -134,7 +134,7 @@ const MediaPanel = ({
                 draggable
                 onDragStart={(e) => handleDragStart(e, file)}
                 onClick={() => onSelect?.(file.url)}
-                className="relative aspect-video bg-[#141414] rounded-lg overflow-hidden border border-white/5 cursor-grab active:cursor-grabbing group hover:border-electric-red/50 transition-all shadow-md hover:shadow-electric-red/10"
+                className="relative aspect-video bg-[#141414] rounded-lg overflow-hidden border border-white/5 cursor-grab active:cursor-grabbing group hover:border-[#ff0000]/50 transition-all shadow-md hover:shadow-[#ff0000]/10"
               >
                 {file.type === "video" ? (
                   <video src={file.url} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity duration-300" />
@@ -142,7 +142,7 @@ const MediaPanel = ({
                   <img src={file.url} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity duration-300" />
                 )}
                 
-                <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2.5">
+                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2.5">
                     <div className="flex items-center gap-2 mb-0.5">
                         <div className="w-1 h-3 bg-[#ff0000] rounded-full shadow-[0_0_8px_#FF2E4D]" />
                         <p className="text-[10px] text-white font-bold truncate w-full tracking-wide">{file.name}</p>
@@ -372,7 +372,7 @@ const CopilotPanel = ({
               "p-3.5 rounded-2xl text-xs leading-relaxed max-w-[85%] shadow-md border relative group",
               msg.role === "ai" 
                 ? "bg-[#18181b] border-white/5 text-neutral-300 rounded-tl-none hover:border-[#52020e] transition-colors" 
-                : "bg-linear-to-br from-[#ff0000] to-[#910319] border-[#ff0000] text-white rounded-tr-none shadow-[0_2px_10px_rgba(255,46,77,0.2)]"
+                : "bg-gradient-to-br from-[#ff0000] to-[#910319] border-[#ff0000] text-white rounded-tr-none shadow-[0_2px_10px_rgba(255,46,77,0.2)]"
             )}>
               {msg.text}
             </div>
@@ -382,7 +382,7 @@ const CopilotPanel = ({
         {/* --- COOL PROCESSING STATE --- */}
         {isProcessing && (
            <div className="flex gap-3 animate-in fade-in duration-300">
-              <div className="w-8 h-8 rounded-full bg-electric-red/10 border border-electric-red/30 flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(255,46,77,0.2)]">
+              <div className="w-8 h-8 rounded-full bg-[#ff0000]/10 border border-[#ff0000]/30 flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(255,46,77,0.2)]">
                  <Loader2 className="w-4 h-4 text-[#ff0000] animate-spin" />
               </div>
               <div className="p-3.5 rounded-2xl rounded-tl-none bg-[#111] border border-white/5 flex flex-col gap-2 min-w-[160px] shadow-lg">
@@ -391,7 +391,7 @@ const CopilotPanel = ({
                  </span>
                  {/* Shimmer Effect Bar */}
                  <div className="h-1.5 w-full bg-neutral-800 rounded-full overflow-hidden relative">
-                    <div className="absolute inset-0 bg-linear-to-r from-transparent via-[#ff0000] to-transparent w-1/2 animate-[shimmer_1.5s_infinite] translate-x-[-100%]" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#ff0000] to-transparent w-1/2 animate-[shimmer_1.5s_infinite] translate-x-[-100%]" />
                  </div>
               </div>
            </div>
@@ -483,7 +483,13 @@ const MagicAssetsPanel = () => {
       const res = await fetch("http://localhost:8000/generate-sfx", { method: "POST", body: formData });
       const data = await res.json();
       if (data.status === "success") {
-        const newFile: MediaFile = { name: data.name, type: "audio", url: data.url, duration: data.duration };
+        // Backend returns: { status, url, duration, name }
+        const newFile: MediaFile = { 
+            name: data.name, 
+            type: "audio", 
+            url: data.url, 
+            duration: data.duration 
+        };
         setGeneratedFiles(prev => [newFile, ...prev]);
         setPrompt(""); 
       } else { alert("Generation failed"); }
@@ -491,6 +497,7 @@ const MagicAssetsPanel = () => {
   };
 
   const handleDragStart = (e: React.DragEvent, file: MediaFile) => {
+    // Set type to "audio" so Timeline knows it belongs on audio track
     e.dataTransfer.setData("application/json", JSON.stringify({ ...file, type: "audio" }));
     e.dataTransfer.effectAllowed = "copy";
   };
@@ -571,16 +578,35 @@ const SubtitlesPanel = ({ selectedClip }: { selectedClip?: Clip | null }) => {
     setSubtitles([]);
     try {
         const formData = new FormData();
-        formData.append("filename", selectedClip.url.split("/").pop() || "");
+        // Extract just the filename to match backend expectation
+        const filename = selectedClip.url.split("/").pop() || "";
+        formData.append("filename", filename);
+        
         const res = await fetch("http://localhost:8000/generate-subtitles", { method: "POST", body: formData });
         const data = await res.json();
-        if (data.status === "success") setSubtitles(data.subtitles);
-        else alert("Failed.");
-    } catch (e) { alert("Error."); } finally { setIsGenerating(false); }
+        
+        if (data.status === "success") {
+            setSubtitles(data.subtitles);
+        } else { 
+            alert("Failed to generate captions."); 
+        }
+    } catch (e) { 
+        console.error(e);
+        alert("Error connecting to subtitle service."); 
+    } finally { 
+        setIsGenerating(false); 
+    }
   };
 
   const handleDragStart = (e: React.DragEvent, sub: any) => {
-    e.dataTransfer.setData("application/json", JSON.stringify({ name: sub.text, type: "text", url: "", duration: sub.end - sub.start }));
+    // Format specifically for Timeline "handleExternalDrop"
+    // We send: name (text content), type="text", duration (end-start)
+    e.dataTransfer.setData("application/json", JSON.stringify({ 
+        name: sub.text, 
+        type: "text", 
+        url: "", 
+        duration: sub.end - sub.start 
+    }));
     e.dataTransfer.effectAllowed = "copy";
   };
 

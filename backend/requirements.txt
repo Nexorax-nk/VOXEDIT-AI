@@ -6,4 +6,9 @@ elevenlabs
 ffmpeg-python
 python-dotenv
 ffmpeg-python
-SpeechRecognition pydub
+SpeechRecognition 
+pydub
+numpy 
+scipy 
+faster-whisper
+torch

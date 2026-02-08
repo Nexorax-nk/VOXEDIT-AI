@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import io
 import json 
 import ffmpeg # Needed for probing duration
+from services.subtitle_gen import generate_subtitles
 
 # --- IMPORT CUSTOM SERVICES ---
 from services.ai_agent import analyze_command
@@ -224,6 +225,22 @@ async def generate_sfx_endpoint(
         "url": f"http://localhost:8000/files/{filename}",
         "duration": dur,
         "name": text
+    }
+# --- 6. SUBTITLE GENERATION ENDPOINT ---
+@app.post("/generate-subtitles")
+async def generate_subtitles_endpoint(
+    filename: str = Form(...)
+):
+    print(f"📝 Generating Subtitles for: {filename}")
+    
+    subtitles = generate_subtitles(filename)
+    
+    if subtitles is None:
+        raise HTTPException(status_code=500, detail="Subtitle generation failed")
+    
+    return {
+        "status": "success",
+        "subtitles": subtitles
     }
 
 if __name__ == "__main__":

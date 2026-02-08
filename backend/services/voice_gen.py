@@ -1,49 +1,69 @@
 # backend/services/voice_gen.py
 import os
 import uuid
+import hashlib
 from elevenlabs.client import ElevenLabs
+from elevenlabs import VoiceSettings
 from dotenv import load_dotenv
 
-# Load environment variables (API Key)
+# Load environment variables
 load_dotenv()
 
-# Initialize the ElevenLabs Client
+# Initialize Client
 client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
 
-# Define where temporary audio files go
+# Configuration
 TEMP_DIR = "temp_storage"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
+# 🚀 CACHE SYSTEM: Stores { "text_hash": "file_path" }
+# This makes common responses ("Okay.", "Done.") instant.
+AUDIO_CACHE = {}
+
 def generate_voice_reply(text: str):
     """
-    Generates a spoken audio response from text using ElevenLabs.
-    Uses the 'turbo_v2' model for low latency (perfect for chat).
+    Generates conversational audio using ElevenLabs Turbo v2.5.
+    Includes caching for zero-latency repeats.
     """
     if not text:
         return None
 
     try:
-        print(f"🎙️ Generating Voice Reply for: '{text[:30]}...'")
+        # 1. CHECK CACHE (Instant Return)
+        # Create a unique hash for the text to use as a key
+        text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
+        
+        if text_hash in AUDIO_CACHE:
+            cached_path = AUDIO_CACHE[text_hash]
+            if os.path.exists(cached_path):
+                print(f"⚡ Cache Hit! Serving existing audio for: '{text[:20]}...'")
+                return cached_path
 
-        # --- FIX: USE NEW SDK METHOD ---
-        # The 'generate' method was removed in v1.0. 
-        # We now use text_to_speech.convert() which returns a generator (stream) of bytes.
+        print(f"🎙️ Generating New Voice for: '{text[:30]}...'")
+
+        # 2. GENERATE STREAM (Using Turbo 2.5)
         audio_stream = client.text_to_speech.convert(
             text=text,
-            voice_id="JBFqnCBsd6RMkjVDRZzb", # Voice ID for 'Adam'
-            model_id="eleven_turbo_v2",      # Optimized for latency
-            output_format="mp3_44100_128"    # Standard MP3 format
+            voice_id="JBFqnCBsd6RMkjVDRZzb", # 'Adam' (Great narrator voice)
+            model_id="eleven_turbo_v2_5",    # 🚀 UPGRADE: Newer, faster, more natural
+            output_format="mp3_44100_128",
+            voice_settings=VoiceSettings(
+                stability=0.4,       # Lower = more emotion/variation
+                similarity_boost=0.8 # Higher = clearer voice
+            )
         )
 
-        # 2. Save File Locally
+        # 3. SAVE FILE
         filename = f"reply_{uuid.uuid4()}.mp3"
         filepath = os.path.join(TEMP_DIR, filename)
         
-        # We must consume the stream and write bytes to the file
         with open(filepath, "wb") as f:
             for chunk in audio_stream:
                 if chunk:
                     f.write(chunk)
+        
+        # 4. UPDATE CACHE
+        AUDIO_CACHE[text_hash] = filepath
         
         print(f"✅ Voice generated: {filepath}")
         return filepath
@@ -56,10 +76,13 @@ def generate_voice_reply(text: str):
 # LOCAL TEST RUNNER
 # =========================
 if __name__ == "__main__":
-    # Quick test to verify your API Key works
-    print("Testing ElevenLabs generation...")
-    path = generate_voice_reply("Hello! I am your AI video editor.")
-    if path:
-        print(f"Success! File saved at: {path}")
-    else:
-        print("Failed to generate voice.")
+    print("Testing Conversational Voice...")
+    
+    # First run (Generates)
+    path1 = generate_voice_reply("Hello! I am VoxAgent.")
+    
+    # Second run (Should hit cache)
+    path2 = generate_voice_reply("Hello! I am VoxAgent.")
+    
+    if path1 == path2:
+        print("🎉 Success! Caching is working.")
