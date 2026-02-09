@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { 
   ZoomIn, ZoomOut, Maximize, Scissors, Trash2, 
-  Video, Mic, Type, MoreHorizontal, Layers
+  Video, Mic, Type, MoreHorizontal, Layers, Magnet, 
+  Link2, Unlink2, Copy, FileAudio, Merge
 } from "lucide-react"; 
 import { cn } from "@/lib/utils";
 
@@ -17,12 +18,19 @@ export type Clip = {
   offset: number;   
   url?: string;
   type: string;
+  // New props for advanced features
+  volume?: number; 
+  isLinked?: boolean; 
+  linkedId?: string; // ID of linked audio/video
 };
+
 export type Track = {
   id: string;
   type: TrackType;
   name: string;
   clips: Clip[];
+  muted?: boolean;
+  locked?: boolean;
 };
 
 type InteractionMode = "NONE" | "MOVE" | "TRIM_LEFT" | "TRIM_RIGHT";
@@ -38,6 +46,9 @@ interface TimelineProps {
   onDeleteClip: (trackId: string, clipId: string) => void;
   selectedClipId?: string;
   onSelectClip: (id: string | null) => void;
+  // New Handlers
+  onExtractAudio?: (trackId: string, clipId: string) => void;
+  onMergeClips?: (trackId: string, clipIds: string[]) => void;
 }
 
 export default function Timeline({ 
@@ -50,13 +61,22 @@ export default function Timeline({
   onSplitClip,
   onDeleteClip,
   selectedClipId,
-  onSelectClip
+  onSelectClip,
+  onExtractAudio,
+  onMergeClips
 }: TimelineProps) {
   
   const [zoom, setZoom] = useState(30); 
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isFocused, setIsFocused] = useState(false);
+  const [snappingEnabled, setSnappingEnabled] = useState(true);
+  
+  // Context Menu State
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, clipId: string, trackId: string } | null>(null);
+  
+  // Multi-Selection State
+  const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(new Set());
 
   // --- REFS FOR SMOOTH DRAG LOGIC ---
   const stateRef = useRef({
@@ -76,7 +96,7 @@ export default function Timeline({
   useEffect(() => { stateRef.current.tracks = tracks; }, [tracks]);
   useEffect(() => { stateRef.current.zoom = zoom; }, [zoom]);
 
-  // --- LOCAL VISUAL STATE (For React Rendering) ---
+  // --- LOCAL VISUAL STATE ---
   const [visualDrag, setVisualDrag] = useState<{
     isDragging: boolean;
     clipId: string | null;
@@ -114,10 +134,18 @@ export default function Timeline({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === "INPUT") return;
+      
+      // Delete
       if ((e.key === "Backspace" || e.key === "Delete") && selectedClipId) {
         tracks.forEach(t => t.clips.find(c => c.id === selectedClipId) && onDeleteClip(t.id, selectedClipId));
       }
+      
+      // Split (C or Ctrl+K)
       if ((e.key === "c" || (e.ctrlKey && e.key === "k")) && selectedClipId) handleSplit();
+      
+      // Zoom Shortcuts (+/-)
+      if (e.key === "=" || e.key === "+") setZoom(z => Math.min(z + 10, 300));
+      if (e.key === "-") setZoom(z => Math.max(z - 10, 2));
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -126,8 +154,22 @@ export default function Timeline({
   // --- DRAG HANDLERS ---
   const handleMouseDown = (e: React.MouseEvent, clip: Clip, trackId: string, mode: InteractionMode) => {
     e.stopPropagation(); e.preventDefault();
+    
+    // Handle Multi-Select (Ctrl/Cmd Click)
+    if (e.ctrlKey || e.metaKey) {
+        const newSet = new Set(selectedClipIds);
+        if (newSet.has(clip.id)) newSet.delete(clip.id);
+        else newSet.add(clip.id);
+        setSelectedClipIds(newSet);
+    } else {
+        if (!selectedClipIds.has(clip.id)) {
+            setSelectedClipIds(new Set([clip.id]));
+        }
+    }
+    
     onSelectClip(clip.id);
     setIsFocused(true);
+    setContextMenu(null); // Close menu if open
 
     stateRef.current.dragMode = mode;
     stateRef.current.dragClipId = clip.id;
@@ -155,6 +197,23 @@ export default function Timeline({
 
       if (state.dragMode === "MOVE") {
           newStart = Math.max(0, state.originalStart + deltaSeconds);
+          
+          // SNAP LOGIC
+          if (snappingEnabled) {
+              const snapThreshold = 10 / state.zoom; // 10 pixels snapping range
+              // Snap to 0
+              if (Math.abs(newStart) < snapThreshold) newStart = 0;
+              // Snap to Playhead
+              if (Math.abs(newStart - currentTime) < snapThreshold) newStart = currentTime;
+              
+              // Snap to other clips
+              state.tracks.forEach(t => t.clips.forEach(c => {
+                  if (c.id !== state.dragClipId) {
+                      if (Math.abs(newStart - (c.start + c.duration)) < snapThreshold) newStart = c.start + c.duration;
+                      if (Math.abs(newStart - c.start) < snapThreshold) newStart = c.start;
+                  }
+              }));
+          }
       } 
       else if (state.dragMode === "TRIM_LEFT") {
           const maxStart = state.originalStart + state.originalDuration - 0.2; 
@@ -206,38 +265,25 @@ export default function Timeline({
       setVisualDrag({ isDragging: false, clipId: null, start: 0, duration: 0 });
   };
 
-  // --- EXTERNAL DROP (UPDATED WITH 1/3 SCALING LOGIC) ---
+  // --- EXTERNAL DROP ---
   const handleExternalDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
   
   const handleExternalDrop = (e: React.DragEvent, trackId: string) => {
     e.preventDefault();
     const data = e.dataTransfer.getData("application/json");
-    
     if (data && scrollContainerRef.current) {
         const parsedClip = JSON.parse(data);
         const rect = scrollContainerRef.current.getBoundingClientRect();
         const clickX = e.clientX - rect.left + scrollContainerRef.current.scrollLeft;
-        
-        // Calculate drop time based on CURRENT zoom
         const dropTime = Math.max(0, clickX / zoom);
         onDropNewClip(trackId, parsedClip, dropTime);
-
-        // --- THE "1/3rd" AUTO-ZOOM FEATURE ---
-        // If the timeline is empty (first clip), adjust zoom so the clip takes up 1/3 of the viewport.
-        const totalClips = tracks.reduce((acc, t) => acc + t.clips.length, 0);
-        
-        if (totalClips === 0) {
-            const containerWidth = rect.width;
-            const clipDuration = parsedClip.duration || 10;
-            
-            // Formula: (ContainerWidth / 3) = ClipDuration * NewZoom
-            // Therefore: NewZoom = (ContainerWidth / 3) / ClipDuration
-            const targetZoom = (containerWidth / 3) / clipDuration;
-            
-            // Apply zoom with safety clamps
-            setZoom(Math.min(Math.max(targetZoom, 2), 300));
-        }
     }
+  };
+
+  // --- CONTEXT MENU HANDLER ---
+  const handleContextMenu = (e: React.MouseEvent, clipId: string, trackId: string) => {
+      e.preventDefault();
+      setContextMenu({ x: e.clientX, y: e.clientY, clipId, trackId });
   };
 
   // --- HELPERS ---
@@ -251,7 +297,6 @@ export default function Timeline({
     }
   };
   
-  // Adjusted "Fit to Screen" to also follow the 1/3rd style logic roughly (fit with padding)
   const fitToScreen = () => {
     let maxEnd = 10;
     tracks.forEach(t => t.clips.forEach(c => maxEnd = Math.max(maxEnd, c.start + c.duration)));
@@ -270,34 +315,26 @@ export default function Timeline({
 
   return (
     <>
-    <style jsx global>{`
-        .timeline-scroll::-webkit-scrollbar { height: 10px; width: 10px; background: #0A0A0A; }
-        .timeline-scroll::-webkit-scrollbar-track { background: #0A0A0A; border-top: 1px solid rgba(255,255,255,0.05); }
-        .timeline-scroll::-webkit-scrollbar-thumb { background: #222; border-radius: 5px; border: 2px solid #0A0A0A; }
-        .timeline-scroll::-webkit-scrollbar-thumb:hover { background: #333; }
-        .timeline-scroll::-webkit-scrollbar-corner { background: #0A0A0A; }
-    `}</style>
-
     <div 
         className="flex flex-col h-full w-full bg-[#0A0A0A] text-gray-300 font-sans select-none relative overflow-hidden outline-none" 
         ref={containerRef}
         tabIndex={0} 
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
-        onClick={() => setIsFocused(true)} 
+        onClick={() => { setIsFocused(true); setContextMenu(null); }} 
     >
       
       {/* --- TOOLBAR --- */}
       <div className="h-10.7 border-b border-white/6 flex items-center justify-between px-4 bg-[#141414] shrink-0 z-40 relative">
          <div className="flex gap-3 items-center">
-             <div className="flex bg-[#141414] p-0.5 rounded-lg ">
+             <div className="flex bg-[#141414] p-0.5 rounded-lg">
                 <button 
                   onClick={handleSplit} 
                   disabled={!selectedClipId} 
                   className={cn(
                       "flex items-center gap-2 px-3 py-1.5 rounded-sm text-[10px] font-bold tracking-wider uppercase transition-all",
                       selectedClipId 
-                          ? "text-[#ff0000] hover:bg-electric-red/10 hover:shadow-[0_0_15px_rgba(255,46,77,0.2)]" 
+                          ? "text-[#ff0000] hover:bg-[#ff0000]/10 hover:shadow-[0_0_15px_rgba(255,0,0,0.2)]" 
                           : "text-neutral-600 cursor-not-allowed"
                   )}
                 >
@@ -310,14 +347,23 @@ export default function Timeline({
                   disabled={!selectedClipId} 
                   className={cn(
                     "p-1.5 rounded-sm transition-colors",
-                    selectedClipId ? "text-neutral-500 hover:text-[#ff0000] hover:bg-electric-red/10" : "text-neutral-700 cursor-not-allowed"
+                    selectedClipId ? "text-neutral-500 hover:text-[#ff0000] hover:bg-[#ff0000]/10" : "text-neutral-700 cursor-not-allowed"
                   )}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
+                <div className="w-px bg-white/6 my-1 mx-1" />
+                <button 
+                    onClick={() => setSnappingEnabled(!snappingEnabled)}
+                    className={cn("p-1.5 rounded-sm transition-colors", snappingEnabled ? "text-[#ff0000]" : "text-neutral-600")}
+                    title="Toggle Snapping"
+                >
+                    <Magnet className="w-3.5 h-3.5" />
+                </button>
              </div>
          </div>
          
+         {/* Timecode */}
          <div className="absolute left-1/2 -translate-x-1/2 font-mono text-xs font-semibold text-[#e71111] tracking-widest bg-[#141414] px-4 py-1.5 rounded-full border border-[#141414]">
             {new Date(currentTime * 1000).toISOString().substr(11, 8)}
             <span className="text-neutral-500 text-[10px] ml-1">{(currentTime % 1).toFixed(2).substring(1)}</span>
@@ -340,7 +386,7 @@ export default function Timeline({
         <div className="w-56 bg-[#0E0E0E] border-r border-white/6 flex flex-col shrink-0 z-30">
              <div className="h-9 border-b border-white/6 bg-[#0E0E0E] flex items-center px-4">
                  <span className="text-[9px] font-bold text-neutral-500 tracking-[0.2em] uppercase flex items-center gap-2">
-
+                    TIMELINE LAYERS
                  </span>
              </div>
              
@@ -351,8 +397,8 @@ export default function Timeline({
                       <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-3">
                               <div className={cn(
-                                "p-1.5 rounded bg-neutral-900 border border-white/5 transition-colors",
-                                track.type === 'video' ? "text-[#ff0000]" : track.type === 'audio' ? "text-[#ff0000]" : "text-[#ff0000]"
+                                "p-1.5 rounded bg-neutral-900 border border-white/6 transition-colors",
+                                track.type === 'video' ? "text-white" : "text-white"
                               )}>
                                    {getTrackIcon(track.type)}
                               </div>
@@ -360,10 +406,9 @@ export default function Timeline({
                                   {track.name}
                               </span>
                           </div>
-                          <MoreHorizontal className="w-4 h-4 text-neutral-600 hover:text-white cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </div>
-                      <div className="flex gap-2 pl-9">
-                         <span className="text-[9px] text-neutral-600 bg-neutral-900/50 px-1.5 py-0.5 rounded border border-white/5 font-mono tracking-wide">{track.type.toUpperCase()}</span>
+                          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <MoreHorizontal className="w-4 h-4 text-neutral-600 hover:text-white cursor-pointer" />
+                          </div>
                       </div>
                   </div>
                ))}
@@ -376,11 +421,13 @@ export default function Timeline({
           ref={scrollContainerRef}
           onScroll={() => { /* Sync if needed */ }}
           onClick={(e) => {
+             // Click on empty space clears selection
              if((e.target as HTMLElement).classList.contains('track-lane') || (e.target as HTMLElement).classList.contains('timeline-bg')) {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const scrollLeft = e.currentTarget.scrollLeft;
                 onSeek((e.clientX - rect.left + scrollLeft) / zoom);
                 onSelectClip(null);
+                setSelectedClipIds(new Set());
              }
           }}
         >
@@ -410,13 +457,13 @@ export default function Timeline({
                         <div 
                            key={track.id} 
                            data-track-id={track.id} 
-                           className="track-lane h-20 border-b border-white/6 relative hover:bg-white/1 transition-colors"
+                           className="track-lane h-20 border-b border-white/6 relative hover:bg-[#121111] transition-colors"
                            onDragOver={handleExternalDragOver} 
                            onDrop={(e) => handleExternalDrop(e, track.id)}
                         >
                             {track.clips.map(clip => {
                                 const isDraggingThis = visualDrag.isDragging && visualDrag.clipId === clip.id;
-                                const isSelected = selectedClipId === clip.id;
+                                const isSelected = selectedClipId === clip.id || selectedClipIds.has(clip.id);
                                 const currentStart = isDraggingThis ? visualDrag.start : clip.start;
                                 const currentDuration = isDraggingThis ? visualDrag.duration : clip.duration;
                                 
@@ -446,6 +493,7 @@ export default function Timeline({
                                           ...clipStyle
                                        }} 
                                        onMouseDown={(e) => handleMouseDown(e, clip, track.id, "MOVE")}
+                                       onContextMenu={(e) => handleContextMenu(e, clip.id, track.id)}
                                   >
                                       {track.type === 'audio' && (
                                          <div className="absolute inset-0 flex items-center opacity-30 pointer-events-none">
@@ -480,6 +528,38 @@ export default function Timeline({
              </div>
         </div>
       </div>
+
+      {/* --- RIGHT CLICK CONTEXT MENU --- */}
+      {contextMenu && (
+          <div 
+            className="fixed z-50 w-48 bg-[#111] border border-white/10 rounded-lg shadow-2xl py-1 animate-in fade-in zoom-in-95 duration-100"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onMouseLeave={() => setContextMenu(null)}
+          >
+              <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-500 uppercase tracking-wider border-b border-white/5 mb-1">
+                  Clip Options
+              </div>
+              <button 
+                onClick={() => { onExtractAudio?.(contextMenu.trackId, contextMenu.clipId); setContextMenu(null); }}
+                className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-white/10 hover:text-white flex items-center gap-2"
+              >
+                  <FileAudio className="w-3.5 h-3.5" /> Extract Audio
+              </button>
+              <button 
+                onClick={() => { onMergeClips?.(contextMenu.trackId, Array.from(selectedClipIds)); setContextMenu(null); }}
+                className="w-full text-left px-3 py-2 text-xs text-neutral-300 hover:bg-white/10 hover:text-white flex items-center gap-2"
+              >
+                  <Merge className="w-3.5 h-3.5" /> Merge Selected
+              </button>
+              <div className="h-px bg-white/5 my-1" />
+              <button 
+                onClick={() => { onDeleteClip(contextMenu.trackId, contextMenu.clipId); setContextMenu(null); }}
+                className="w-full text-left px-3 py-2 text-xs text-[#ff0000] hover:bg-[#ff0000]/10 flex items-center gap-2"
+              >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
+              </button>
+          </div>
+      )}
     </div>
     </>
   );

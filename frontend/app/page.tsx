@@ -6,6 +6,7 @@ import TopBar from "@/components/editor/TopBar";
 import ToolsPanel from "@/components/editor/ToolsPanel";
 import Player from "@/components/editor/Player";
 import Timeline, { Track, Clip } from "@/components/editor/Timeline";
+import ReasoningPanel from "@/components/editor/ReasoningPanel"; // <--- NEW IMPORT
 
 const INITIAL_TRACKS: Track[] = [
   { id: "V1", type: "video", name: "Main Video", clips: [] },
@@ -22,6 +23,9 @@ export default function EditorPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   
+  // --- AI STATE ---
+  const [isAiProcessing, setIsAiProcessing] = useState(false);
+
   // --- EXPORT STATE ---
   const [isExporting, setIsExporting] = useState(false);
 
@@ -38,44 +42,44 @@ export default function EditorPage() {
 
   // --- ENGINE 1: VIDEO CLIP DETECTION ---
   useEffect(() => {
-     const videoTrack = tracks.find(t => t.type === 'video');
-     
-     if (videoTrack) {
-        const activeClip = videoTrack.clips.find(clip => 
-           currentTime >= clip.start && currentTime < (clip.start + clip.duration)
-        );
+      const videoTrack = tracks.find(t => t.type === 'video');
+      
+      if (videoTrack) {
+         const activeClip = videoTrack.clips.find(clip => 
+            currentTime >= clip.start && currentTime < (clip.start + clip.duration)
+         );
 
-        if (activeClip && activeClip.url) {
-           if (playerSrc !== activeClip.url) {
-               setPlayerSrc(activeClip.url);
-               setPlayerClipStart(activeClip.start);
-               setPlayerClipOffset(activeClip.offset);
-           }
-        } else {
-           if (playerSrc !== null) setPlayerSrc(null);
-        }
-     }
+         if (activeClip && activeClip.url) {
+            if (playerSrc !== activeClip.url) {
+                setPlayerSrc(activeClip.url);
+                setPlayerClipStart(activeClip.start);
+                setPlayerClipOffset(activeClip.offset);
+            }
+         } else {
+            if (playerSrc !== null) setPlayerSrc(null);
+         }
+      }
   }, [currentTime, tracks, playerSrc]);
 
   // --- ENGINE 2: AUDIO CLIP DETECTION ---
   useEffect(() => {
-     const audioTrack = tracks.find(t => t.type === 'audio');
-     
-     if (audioTrack) {
-        const activeClip = audioTrack.clips.find(clip => 
-           currentTime >= clip.start && currentTime < (clip.start + clip.duration)
-        );
+      const audioTrack = tracks.find(t => t.type === 'audio');
+      
+      if (audioTrack) {
+         const activeClip = audioTrack.clips.find(clip => 
+            currentTime >= clip.start && currentTime < (clip.start + clip.duration)
+         );
 
-        if (activeClip && activeClip.url) {
-           if (audioSrc !== activeClip.url) {
-               setAudioSrc(activeClip.url);
-               setAudioClipStart(activeClip.start);
-               setAudioClipOffset(activeClip.offset);
-           }
-        } else {
-           if (audioSrc !== null) setAudioSrc(null);
-        }
-     }
+         if (activeClip && activeClip.url) {
+            if (audioSrc !== activeClip.url) {
+                setAudioSrc(activeClip.url);
+                setAudioClipStart(activeClip.start);
+                setAudioClipOffset(activeClip.offset);
+            }
+         } else {
+            if (audioSrc !== null) setAudioSrc(null);
+         }
+      }
   }, [currentTime, tracks, audioSrc]);
 
   // --- ENGINE 3: AUDIO SYNC ---
@@ -188,8 +192,8 @@ export default function EditorPage() {
   };
 
   const handleDeleteClip = (trackId: string, clipId: string) => {
-     setTracks(prev => prev.map(t => t.id === trackId ? { ...t, clips: t.clips.filter(c => c.id !== clipId) } : t));
-     setSelectedClipId(null);
+      setTracks(prev => prev.map(t => t.id === trackId ? { ...t, clips: t.clips.filter(c => c.id !== clipId) } : t));
+      setSelectedClipId(null);
   };
 
   const getSelectedClipObject = () => {
@@ -202,6 +206,9 @@ export default function EditorPage() {
   };
 
   const handleAiProcessingComplete = (newUrl: string, newDuration: number) => {
+    // Notify Right Panel Processing Stopped
+    setIsAiProcessing(false);
+
     if (!selectedClipId) return;
     setTracks(prev => prev.map(track => {
         if (!track.clips.some(c => c.id === selectedClipId)) return track;
@@ -223,6 +230,38 @@ export default function EditorPage() {
     }));
     setPlayerSrc(newUrl);
     setPlayerClipOffset(0);
+  };
+
+  // --- NEW: EXTRACT AUDIO ---
+  const handleExtractAudio = (trackId: string, clipId: string) => {
+      const sourceTrack = tracks.find(t => t.id === trackId);
+      const clip = sourceTrack?.clips.find(c => c.id === clipId);
+      if (!clip) return;
+
+      const audioTrack = tracks.find(t => t.type === 'audio');
+      if (!audioTrack) return;
+
+      const newAudioClip: Clip = {
+          ...clip,
+          id: clip.id + "_audio",
+          type: "audio",
+          linkedId: clip.id, // Link them
+          name: clip.name + " (Audio)"
+      };
+
+      // Add audio clip and link original video
+      setTracks(prev => prev.map(t => {
+          if (t.id === audioTrack.id) {
+              return { ...t, clips: [...t.clips, newAudioClip] };
+          }
+          if (t.id === trackId) {
+              return {
+                  ...t,
+                  clips: t.clips.map(c => c.id === clipId ? { ...c, linkedId: newAudioClip.id, isLinked: true } : c)
+              };
+          }
+          return t;
+      }));
   };
 
   const handleExport = async () => {
@@ -279,7 +318,12 @@ export default function EditorPage() {
                   activeTool={activeTool} 
                   onMediaSelect={() => {}} 
                   selectedClip={getSelectedClipObject()}
-                  onUpdateProcessedClip={handleAiProcessingComplete}
+                  // Pass handler to ToolsPanel so it can trigger the animation
+                  onUpdateProcessedClip={(url, dur) => {
+                      setIsAiProcessing(true); // Start animation immediately when user submits
+                      // Simulate delay or wait for actual completion
+                      setTimeout(() => handleAiProcessingComplete(url, dur), 100); 
+                  }}
               />
           </div>
           
@@ -289,9 +333,8 @@ export default function EditorPage() {
             {/* TOP SPLIT: PLAYER & LOG */}
             <div className="flex-1 flex min-h-0 overflow-hidden bg-[#1f1e1e]">
                 
-                {/* 1. PLAYER CONTAINER - Fits Available Space Perfectly */}
+                {/* 1. PLAYER CONTAINER */}
                 <div className="flex-1 flex items-center justify-center relative overflow-hidden">
-                    {/* The Player component will stretch to fill this container */}
                     <div className="w-full h-full flex items-center justify-center p-4">
                         <Player 
                           src={playerSrc} 
@@ -308,19 +351,8 @@ export default function EditorPage() {
 
                 {/* 2. REASONING LOG (Agent Brain) - w-80 (320px) */}
                 <div className="w-90 bg-[#09090b] border-l border-white/10 flex flex-col z-20 shadow-xl">
-                    {/* Log Header */}
-                    <div className="h-10 border-b border-white/10 flex items-center justify-between px-4 bg-[#121212]">
-                         <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-                            <span className="text-[10px] font-mono font-bold text-gray-400 uppercase tracking-widest">VoxAgent</span>
-                         </div>
-                         <span className="text-[9px] text-gray-600 font-mono">GEMINI-1.5-PRO</span>
-                    </div>
-
-                    {/* Log Stream - STARTED EMPTY */}
-                    <div className="flex-1 p-4 overflow-y-auto font-mono text-xs space-y-3">
-                         {/* Logs will appear here dynamically */}
-                    </div>
+                    {/* The New Component Goes Here */}
+                    <ReasoningPanel isProcessing={isAiProcessing} />
                 </div>
 
             </div>
@@ -341,6 +373,7 @@ export default function EditorPage() {
                   onDeleteClip={handleDeleteClip}
                   selectedClipId={selectedClipId ?? undefined}
                   onSelectClip={setSelectedClipId}
+                  onExtractAudio={handleExtractAudio}
                />
             </div>
 
