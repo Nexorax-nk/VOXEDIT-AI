@@ -11,7 +11,7 @@ import json
 import ffmpeg 
 from services.subtitle_gen import generate_subtitles
 
-# --- IMPORT CUSTOM SERVICES ---
+# --- IMPORT CUSTOM SERVICES -----
 from services.ai_agent import analyze_command
 from services.video_engine import process_video, stitch_videos
 from services.voice_gen import generate_voice_reply 
@@ -31,9 +31,7 @@ UPLOAD_DIR = "temp_storage"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/files", StaticFiles(directory=UPLOAD_DIR), name="files")
 
-# ==========================================
-# 🧠 WEBSOCKET CONNECTION MANAGER (ROBUST)
-# ==========================================
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -66,7 +64,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception:
-        # Catch Windows-specific ConnectionResetErrors (WinError 10054)
+        # Catch Windows-specific ConnectionResetErrors (WinError 10054) and ensures the correct windows
         manager.disconnect(websocket)
 
 # --- 1. UPLOAD ENDPOINT ---
@@ -94,7 +92,7 @@ async def edit_video(
     if not os.path.exists(input_path):
         raise HTTPException(status_code=404, detail="File not found")
 
-    # A. Ask AI (BRANDED FOR HACKATHON)
+    # A. Ask AI (BRANDED FOR HACKATHON) quantum
     await manager.broadcast({"type": "log", "level": "analysis", "message": "Gemini 3.0 Pro reasoning..."})
     ai_plan = await analyze_command(command, video_filename=filename)
     
