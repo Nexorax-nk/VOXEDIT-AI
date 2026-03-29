@@ -439,6 +439,5 @@ Open your browser and navigate to: **http://localhost:3000**
 **Naveen Kumar**  
 *Student@CIT aspiring Full Stack & AI Engineer*
 
-Built for the **Google Gemini-3 Hackathon**.
 
 ---
