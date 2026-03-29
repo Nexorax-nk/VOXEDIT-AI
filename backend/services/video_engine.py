@@ -11,9 +11,6 @@ from functools import lru_cache
 TEMP_DIR = "temp_storage"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# ==========================================
-# 🚀 HARDWARE ACCELERATION (With Validation)
-# ==========================================
 @lru_cache(maxsize=1)
 def get_hardware_encoder():
     """
@@ -24,7 +21,7 @@ def get_hardware_encoder():
         # We query ffmpeg for encoders
         result = subprocess.run(['ffmpeg', '-encoders'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         
-        # Check NVIDIA
+        # Check NVIDIA gpu if not fall backs
         if 'h264_nvenc' in result.stdout:
             print("🚀 Hardware: NVIDIA NVENC Detected")
             return 'h264_nvenc', 'p4'
