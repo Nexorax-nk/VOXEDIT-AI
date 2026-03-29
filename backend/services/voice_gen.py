@@ -16,8 +16,6 @@ client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
 TEMP_DIR = "temp_storage"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# 🚀 CACHE SYSTEM: Stores { "text_hash": "file_path" }
-# This makes common responses ("Okay.", "Done.") instant.
 AUDIO_CACHE = {}
 
 def generate_voice_reply(text: str):
@@ -65,16 +63,13 @@ def generate_voice_reply(text: str):
         # 4. UPDATE CACHE
         AUDIO_CACHE[text_hash] = filepath
         
-        print(f"✅ Voice generated: {filepath}")
+        print(f" Voice generated: {filepath}")
         return filepath
 
     except Exception as e:
-        print(f"❌ ElevenLabs Error: {e}")
+        print(f" ElevenLabs Error: {e}")
         return None
 
-# =========================
-# LOCAL TEST RUNNER
-# =========================
 if __name__ == "__main__":
     print("Testing Conversational Voice...")
     
