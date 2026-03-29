@@ -17,14 +17,14 @@ TEMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp_storag
 if not API_KEY:
     raise RuntimeError("❌ GEMINI_API_KEY not found in .env")
 
-# Initialize Gemini client
+# Initialize Gemini client via API
 genai.configure(api_key=API_KEY)
 
 # --- CONFIGURATION ---
 PRIMARY_MODEL = "gemini-3-pro-preview"  # Fast, multimodal, latest
-FALLBACK_MODEL = "gemini-1.5-pro"       # Stable, high reasoning
+FALLBACK_MODEL = "gemini-1.5-pro"       # Stable, high reasoning backup model
 
-# --- THE "ANTI-HALLUCINATION" SYSTEM PROMPT ---
+# --- THE "ANTI-HALLUCINATION" SYSTEM PROMPT --- ensure low hallucinations 
 SYSTEM_PROMPT = """
 You are **VOXEDIT AGENT**, an autonomous AI video editor.
 Your goal is to translate natural language commands into precise, executable FFmpeg edit plans.
