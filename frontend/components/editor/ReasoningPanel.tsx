@@ -43,7 +43,7 @@ const NeuralVisualizer = ({ active }: { active: boolean }) => {
   );
 };
 
-export default function ReasoningPanel({ isProcessing }: ReasoningPanelProps) {
+export default function ReasoningPanel({ isProcessing, onResult }: ReasoningPanelProps) {
   const [logs, setLogs] = useState<LogMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [aiStats, setAiStats] = useState({ tokens: 0, latency: 0, confidence: 0 });
