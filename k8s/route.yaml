@@ -1,0 +1,13 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: voxedit-api
+  labels:
+    app: voxedit-backend
+spec:
+  host: api.voxedit.example.com
+  to:
+    kind: Service
+    name: backend
+  port:
+    targetPort: 8000
