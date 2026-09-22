@@ -1,0 +1,49 @@
+---
+- name: Deploy VOXEDIT-AI on RHEL/Fedora
+  hosts: all
+  become: yes
+  vars:
+    project_dir: /opt/voxedit-ai
+    repo_url: https://github.com/yourusername/voxedit-ai.git
+
+  tasks:
+    - name: Install required packages (Docker, Git, Docker-Compose)
+      dnf:
+        name:
+          - git
+          - docker
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Clone VOXEDIT-AI repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ project_dir }}"
+        version: main
+        force: yes
+
+    - name: Configure firewall for HTTP/HTTPS/WebSocket traffic
+      firewalld:
+        port: "{{ item }}"
+        permanent: yes
+        state: enabled
+      loop:
+        - "80/tcp"
+        - "443/tcp"
+        - "8000/tcp"
+        - "3000/tcp"
+
+    - name: Reload firewall to apply rules
+      command: firewall-cmd --reload
+
+    - name: Deploy services with docker-compose
+      command: docker compose up -d
+      args:
+        chdir: "{{ project_dir }}"
