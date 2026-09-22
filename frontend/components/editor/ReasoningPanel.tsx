@@ -19,6 +19,7 @@ interface LogMessage {
 
 interface ReasoningPanelProps {
   isProcessing: boolean;
+  onResult?: (data: any) => void;
 }
 
 // --- SUB-COMPONENT: NEURAL VISUALIZER ---
@@ -76,6 +77,9 @@ export default function ReasoningPanel({ isProcessing }: ReasoningPanelProps) {
                 latency: data.latency || prev.latency,
                 confidence: Math.min(99, (prev.confidence || 85) + (Math.random() * 5 - 2))
             }));
+        } else if (data.type === "result") {
+            addLog("success", "Task completed: " + data.task_id);
+            if (onResult) onResult(data);
         }
       } catch (e) {
         addLog("info", event.data);

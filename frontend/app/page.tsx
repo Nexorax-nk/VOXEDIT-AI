@@ -283,15 +283,14 @@ export default function EditorPage() {
           const res = await fetch("http://localhost:8000/render", { method: "POST", body: formData });
           if (res.status === 404) { alert("Backend offline."); setIsExporting(false); return; }
           const data = await res.json();
-          if (data.status === "success") {
-              const link = document.createElement('a');
-              link.href = data.url;
-              link.download = "voxedit_final.mp4";
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
-          } else { alert("Export failed: " + data.message); }
-      } catch (e) { console.error(e); alert("Export failed."); } finally { setIsExporting(false); }
+          if (data.status === "success" || data.status === "processing") {
+              // The download will be triggered by the WebSocket onResult handler
+              // For now, just keep isExporting = true
+          } else { 
+              alert("Export failed: " + data.message); 
+              setIsExporting(false);
+          }
+      } catch (e) { console.error(e); alert("Export failed."); setIsExporting(false); }
   };
 
   return (
@@ -352,7 +351,33 @@ export default function EditorPage() {
                 {/* 2. REASONING LOG (Agent Brain) - w-80 (320px) */}
                 <div className="w-90 bg-[#09090b] border-l border-white/10 flex flex-col z-20 shadow-xl">
                     {/* The New Component Goes Here */}
-                    <ReasoningPanel isProcessing={isAiProcessing} />
+                    <ReasoningPanel 
+                        isProcessing={isAiProcessing} 
+                        onResult={(data) => {
+                            if (data.action === "edit" || data.action === "voice") {
+                                const d = data.action === "voice" ? data.data : data;
+                                if (d.processed_url) {
+                                    handleAiProcessingComplete(d.processed_url, d.new_duration);
+                                } else {
+                                    setIsAiProcessing(false);
+                                }
+                                if (d.reply_audio_url) {
+                                    const audio = new Audio(d.reply_audio_url);
+                                    audio.play().catch(e => console.error("Audio Playback Error:", e));
+                                }
+                            } else if (data.action === "render") {
+                                setIsExporting(false);
+                                if (data.url) {
+                                    const link = document.createElement('a');
+                                    link.href = data.url;
+                                    link.download = "voxedit_final.mp4";
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                }
+                            }
+                        }}
+                    />
                 </div>
 
             </div>

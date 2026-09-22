@@ -236,18 +236,11 @@ const CopilotPanel = ({
                         return [
                             ...newHistory,
                             { role: "user", text: `"${data.transcription}"` },
-                            { role: "ai", text: data.explanation }
+                            { role: "ai", text: "Task queued: " + data.task_id }
                         ];
                     });
-
-                    if (data.reply_audio_url) {
-                        const audio = new Audio(data.reply_audio_url);
-                        audio.play().catch(e => console.error("Audio Playback Error:", e));
-                    }
-
-                    if (data.processed_url && onProcessComplete) {
-                        onProcessComplete(data.processed_url, data.new_duration);
-                    }
+                    
+                    // The result will be handled by the WebSocket
                 }
             } catch (e) {
                 setMessages(prev => [...prev, { role: "ai", text: "Voice upload failed." }]);
@@ -309,10 +302,8 @@ const CopilotPanel = ({
         if (data.status === "error") {
             setMessages(prev => [...prev, { role: "ai", text: "Error: " + data.message }]);
         } else {
-            setMessages(prev => [...prev, { role: "ai", text: data.explanation }]);
-            if (data.processed_url && onProcessComplete) {
-                onProcessComplete(data.processed_url, data.new_duration);
-            }
+            setMessages(prev => [...prev, { role: "ai", text: "Task queued: " + data.task_id }]);
+            // Result will be handled by WebSocket
         }
     } catch (e) {
         setMessages(prev => [...prev, { role: "ai", text: "Server connection failed." }]);

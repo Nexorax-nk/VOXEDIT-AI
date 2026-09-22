@@ -10,6 +10,8 @@ import io
 import json 
 import ffmpeg 
 from services.subtitle_gen import generate_subtitles
+from contextlib import asynccontextmanager
+import asyncio
 
 # --- IMPORT CUSTOM SERVICES -----
 from services.ai_agent import analyze_command
@@ -17,7 +19,11 @@ from services.video_engine import process_video, stitch_videos
 from services.voice_gen import generate_voice_reply 
 from services.sfx_gen import generate_sound_effect
 
-app = FastAPI()
+# --- IMPORT ASYNC PIPELINE ---
+from services.pubsub import listen_for_updates
+from tasks import task_analyze_and_edit, task_voice_command, task_render_project
+
+# We will define the lifespan after manager is defined
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,6 +60,27 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start Redis pubsub listener in background
+    listener_task = asyncio.create_task(listen_for_updates(manager))
+    yield
+    listener_task.cancel()
+
+app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+UPLOAD_DIR = "temp_storage"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/files", StaticFiles(directory=UPLOAD_DIR), name="files")
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
@@ -86,58 +113,19 @@ async def edit_video(
     print(f"🎬 EDIT REQUEST: '{command}'")
     
     # 🧠 Broadcast: Start
-    await manager.broadcast({"type": "log", "level": "info", "message": f"Incoming command: '{command}'"})
+    await manager.broadcast({"type": "log", "level": "info", "message": f"Incoming command: '{command}'. Queuing task..."})
     
     input_path = os.path.join(UPLOAD_DIR, filename)
     if not os.path.exists(input_path):
         raise HTTPException(status_code=404, detail="File not found")
 
-    # A. Ask AI (BRANDED FOR HACKATHON) quantum
-    await manager.broadcast({"type": "log", "level": "analysis", "message": "Gemini 3.0 Pro reasoning..."})
-    ai_plan = await analyze_command(command, video_filename=filename)
+    # Dispatch to Celery
+    task = task_analyze_and_edit.delay(command, filename, clip_start, clip_duration)
     
-    actions = ai_plan.get("segments_to_keep", ai_plan.get("actions", []))
-    explanation = ai_plan.get("explanation", "Processed successfully.")
-    
-    # 🧠 Broadcast: Plan
-    if actions:
-        await manager.broadcast({"type": "log", "level": "info", "message": f"Generated {len(actions)} edit actions."})
-    else:
-        await manager.broadcast({"type": "log", "level": "info", "message": "Conversational response generated."})
-
-    # B. Handle Conversation
-    if not actions:
-        return {
-            "status": "success",
-            "original_file": filename,
-            "processed_url": None,
-            "new_duration": None,
-            "explanation": explanation,
-            "actions": []
-        }
-
-    # C. Run Engine
-    print(f"   ⚙️ Executing {len(actions)} actions...")
-    await manager.broadcast({"type": "log", "level": "analysis", "message": "Rendering video effects (FFmpeg)..."})
-    
-    result = await process_video(input_path, actions, clip_start, clip_duration)
-    
-    if not result:
-        await manager.broadcast({"type": "log", "level": "error", "message": "Processing failed."})
-        raise HTTPException(status_code=500, detail="Processing failed")
-
-    new_filename = os.path.basename(result["path"])
-    
-    # 🧠 Broadcast: Success
-    await manager.broadcast({"type": "log", "level": "success", "message": "Video rendering complete."})
-    await manager.broadcast({"type": "stats", "tokens": 145, "latency": 850}) 
-
     return {
-        "status": "success",
-        "processed_url": f"http://localhost:8000/files/{new_filename}",
-        "new_duration": result["duration"],
-        "explanation": explanation,
-        "actions": actions
+        "status": "processing",
+        "task_id": task.id,
+        "message": "Task queued successfully"
     }
 
 # --- 3. VOICE COMMAND ENDPOINT ---
@@ -161,7 +149,7 @@ async def voice_command(
         wav_path = temp_audio_path + ".wav"
         audio_segment.export(wav_path, format="wav")
 
-        # B. Transcribe
+        # B. Transcribe Locally (FastAPI thread)
         await manager.broadcast({"type": "log", "level": "analysis", "message": "Transcribing audio..."})
         recognizer = sr.Recognizer()
         with sr.AudioFile(wav_path) as source:
@@ -169,7 +157,7 @@ async def voice_command(
             try:
                 text_command = recognizer.recognize_google(audio_data)
                 print(f"🗣️ Transcribed: '{text_command}'")
-                await manager.broadcast({"type": "log", "level": "success", "message": f"Identified intent: '{text_command}'"})
+                await manager.broadcast({"type": "log", "level": "success", "message": f"Identified intent: '{text_command}'. Queuing task..."})
             except sr.UnknownValueError:
                 return {"status": "error", "message": "Could not understand audio"}
             except sr.RequestError:
@@ -178,43 +166,15 @@ async def voice_command(
         if os.path.exists(temp_audio_path): os.remove(temp_audio_path)
         if os.path.exists(wav_path): os.remove(wav_path)
 
-        # C. Ask AI (BRANDED FOR HACKATHON)
-        await manager.broadcast({"type": "log", "level": "analysis", "message": "Analyzing multimodal context (Gemini 3.0 Pro)..."})
-        ai_plan = await analyze_command(text_command, video_filename=filename)
-        actions = ai_plan.get("segments_to_keep", ai_plan.get("actions", []))
-        explanation = ai_plan.get("explanation", "Processed successfully.")
-
-        # D. Generate Voice Reply
-        print(f"   🎙️ Generating Reply...")
-        await manager.broadcast({"type": "log", "level": "info", "message": "Synthesizing voice response..."})
-        voice_reply_path = generate_voice_reply(explanation)
-        voice_reply_url = None
-        if voice_reply_path:
-            voice_filename = os.path.basename(voice_reply_path)
-            voice_reply_url = f"http://localhost:8000/files/{voice_filename}"
-
-        response_data = {
-            "status": "success",
+        # C. Dispatch to Celery
+        task = task_voice_command.delay(text_command, filename, clip_start, clip_duration)
+        
+        return {
+            "status": "processing",
+            "task_id": task.id,
             "transcription": text_command,
-            "explanation": explanation,
-            "reply_audio_url": voice_reply_url,
-            "processed_url": None,
-            "new_duration": None,
-            "actions": actions
+            "message": "Task queued successfully"
         }
-
-        # E. Process Video
-        if actions:
-            input_path = os.path.join(UPLOAD_DIR, filename)
-            await manager.broadcast({"type": "log", "level": "analysis", "message": "Executing video edits..."})
-            result = await process_video(input_path, actions, clip_start, clip_duration)
-            if result:
-                new_filename = os.path.basename(result["path"])
-                response_data["processed_url"] = f"http://localhost:8000/files/{new_filename}"
-                response_data["new_duration"] = result["duration"]
-                await manager.broadcast({"type": "log", "level": "success", "message": "Actions applied successfully."})
-
-        return response_data
 
     except Exception as e:
         print(f"Voice Error: {e}")
@@ -224,19 +184,21 @@ async def voice_command(
 @app.post("/render")
 async def render_project(project_data: str = Form(...)):
     print("🎬 Received Render Request...")
-    # Optional: Broadcast render start
-    await manager.broadcast({"type": "log", "level": "info", "message": "Starting final project render..."})
     
     try:
         clips = json.loads(project_data)
         if not clips: return {"status": "error", "message": "No clips to render"}
+        
+        await manager.broadcast({"type": "log", "level": "info", "message": "Queuing final project render..."})
 
-        output_path = await stitch_videos(clips)
-        if not output_path: raise HTTPException(status_code=500, detail="Render failed")
-
-        new_filename = os.path.basename(output_path)
-        await manager.broadcast({"type": "log", "level": "success", "message": "Render Complete."})
-        return {"status": "success", "url": f"http://localhost:8000/files/{new_filename}"}
+        # Dispatch to Celery
+        task = task_render_project.delay(clips)
+        
+        return {
+            "status": "processing",
+            "task_id": task.id,
+            "message": "Task queued successfully"
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
